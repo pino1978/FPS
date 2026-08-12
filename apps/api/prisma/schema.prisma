@@ -55,31 +55,57 @@ model Bet {
 }
 
 model BettingSystem {
-  id         String            @id @default(cuid())
-  mode       String
-  profile    String?
-  budget     Float
-  totalCost  Float
-  played     Boolean           @default(false)
-  status     String            @default("PENDING")
-  createdAt  DateTime          @default(now())
-  selections SystemSelection[]
+  id           String              @id @default(cuid())
+  mode         String
+  profile      String?
+  budget       Float
+  totalCost    Float
+  played       Boolean             @default(false)
+  status       String              @default("PENDING")
+  createdAt    DateTime            @default(now())
+  selections   SystemSelection[]
+  combinations SystemCombination[]
 }
 
 model SystemSelection {
-  id            String        @id @default(cuid())
-  systemId      String
-  system        BettingSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
-  fixtureId     String
-  market        String
-  selection     String
-  eventAt       DateTime
-  odds          Float?
-  status        String        @default("PENDING")
-  verifiedAt    DateTime?
-  resultVersion String?
+  id               String            @id @default(cuid())
+  systemId         String
+  system           BettingSystem     @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  clientKey        String
+  fixtureId        String
+  market           String
+  selection        String
+  eventAt          DateTime
+  odds             Float?
+  status           String            @default("PENDING")
+  verifiedAt       DateTime?
+  resultVersion    String?
+  combinationItems CombinationItem[]
 
+  @@unique([systemId, clientKey])
   @@index([status, eventAt])
+}
+
+model SystemCombination {
+  id        String            @id @default(cuid())
+  systemId  String
+  system    BettingSystem     @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  stake     Float
+  status    String            @default("PENDING")
+  items     CombinationItem[]
+  createdAt DateTime          @default(now())
+
+  @@index([systemId, status])
+}
+
+model CombinationItem {
+  id            String            @id @default(cuid())
+  combinationId String
+  combination   SystemCombination @relation(fields: [combinationId], references: [id], onDelete: Cascade)
+  selectionId   String
+  selection     SystemSelection   @relation(fields: [selectionId], references: [id], onDelete: Cascade)
+
+  @@unique([combinationId, selectionId])
 }
 
 model AuditEvent {
