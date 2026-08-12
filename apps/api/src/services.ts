@@ -1,5 +1,5 @@
 import {Injectable,OnModuleDestroy} from '@nestjs/common';import {PrismaClient} from '@prisma/client';
-export type Fixture={id:string;utcDate:string;status:string;home:{id:string;name:string};away:{id:string;name:string}};export type Standing={teamId:string;played:number;points:number;goalsFor:number;goalsAgainst:number};
+export type Fixture={id:string;utcDate:string;status:string;home:{id:string;name:string};away:{id:string;name:string}};export type Standing={teamId:string;played:number;points:number;goalsFor:number;goalsAgainst:number};export type MatchResult={id:string;status:string;home:number|null;away:number|null;lastUpdated?:string};
 @Injectable() export class PrismaService extends PrismaClient implements OnModuleDestroy{async onModuleDestroy(){await this.$disconnect();}}
 @Injectable() export class FootballProvider{
  private fd=process.env.FOOTBALL_DATA_BASE_URL||'https://api.football-data.org/v4';private af=process.env.API_FOOTBALL_BASE_URL||'https://v3.football.api-sports.io';
@@ -7,4 +7,5 @@ export type Fixture={id:string;utcDate:string;status:string;home:{id:string;name
  async apiFootball(path:string){const key=process.env.API_FOOTBALL_KEY;if(!key)throw new Error('API_FOOTBALL_KEY missing');const r=await fetch(this.af+path,{headers:{'x-apisports-key':key}});if(!r.ok)throw new Error('api-football '+r.status);return r.json() as Promise<any>;}
  async fixtures(competition='SA',date?:string):Promise<Fixture[]>{const q=new URLSearchParams();if(date){q.set('dateFrom',date);q.set('dateTo',date)}const d=await this.footballData(`/competitions/${competition}/matches?${q}`);return (d.matches||[]).map((m:any)=>({id:String(m.id),utcDate:m.utcDate,status:m.status,home:{id:String(m.homeTeam.id),name:m.homeTeam.name},away:{id:String(m.awayTeam.id),name:m.awayTeam.name}}));}
  async standings(competition='SA'):Promise<Standing[]>{const d=await this.footballData(`/competitions/${competition}/standings`);const total=(d.standings||[]).find((x:any)=>x.type==='TOTAL')?.table||[];return total.map((r:any)=>({teamId:String(r.team.id),played:r.playedGames,points:r.points,goalsFor:r.goalsFor,goalsAgainst:r.goalsAgainst}));}
+ async result(matchId:string):Promise<MatchResult>{const m=await this.footballData(`/matches/${encodeURIComponent(matchId)}`);return {id:String(m.id),status:m.status,home:m.score?.fullTime?.home??null,away:m.score?.fullTime?.away??null,lastUpdated:m.lastUpdated};}
 }
