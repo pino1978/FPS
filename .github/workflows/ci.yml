@@ -25,6 +25,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - name: Production dependency security gate
+        run: npm audit --omit=dev --audit-level=high
       - run: npx prisma db push --schema apps/api/prisma/schema.prisma
       - run: npm run typecheck
       - run: npm test
