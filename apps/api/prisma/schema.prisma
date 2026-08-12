@@ -28,6 +28,10 @@ model PredictionSnapshot {
   probability   Float
   confidence    Float
   dataQuality   Float
+  fairOdds      Float?
+  valueStatus   String        @default("UNAVAILABLE")
+  offeredOdds   Float?
+  expectedValue Float?
   status        String
   outcome       String?
   settledAt     DateTime?
