@@ -1,12 +1,19 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
 jobs:
   quality:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16-alpine
-        env: {POSTGRES_USER: fps, POSTGRES_PASSWORD: fps, POSTGRES_DB: fps}
+        env:
+          POSTGRES_USER: fps
+          POSTGRES_PASSWORD: fps
+          POSTGRES_DB: fps
         ports: ['5432:5432']
         options: >-
           --health-cmd="pg_isready -U fps" --health-interval=5s --health-timeout=5s --health-retries=10
@@ -15,14 +22,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: 22, cache: npm}
+        with:
+          node-version: 22
       - run: npm install
       - run: npx prisma db push --schema apps/api/prisma/schema.prisma
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
   live-provider-smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
     steps:
-      - run: echo 'Live provider smoke is intentionally secret-gated.'
+      - name: API-Football free smoke
+        if: env.API_FOOTBALL_KEY != ''
+        run: |
+          code=$(curl -sS -o /tmp/af.json -w "%{http_code}" -H "x-apisports-key: $API_FOOTBALL_KEY" "https://v3.football.api-sports.io/status")
+          test "$code" = "200"
+          node -e "const x=require('/tmp/af.json'); if(x.errors && Object.keys(x.errors).length) process.exit(1); console.log('API-Football authenticated smoke: OK')"
+      - name: football-data.org free smoke
+        if: env.FOOTBALL_DATA_TOKEN != ''
+        run: |
+          code=$(curl -sS -o /tmp/fd.json -w "%{http_code}" -H "X-Auth-Token: $FOOTBALL_DATA_TOKEN" "https://api.football-data.org/v4/competitions/SA/standings")
+          test "$code" = "200"
+          node -e "const x=require('/tmp/fd.json'); if(!x.standings) process.exit(1); console.log('football-data authenticated smoke: OK')"
