@@ -1,7 +1,7 @@
 export type TeamMetrics={played:number;points:number;goalsFor:number;goalsAgainst:number};
 export type MarketPrediction={market:string;selection:string;probability:number;confidence:number;dataQuality:number;status:'ACTIVE'|'NO_BET';reason?:string};
 const clamp=(n:number,min=0,max=1)=>Math.max(min,Math.min(max,n));
-const fact=(n:number)=>n<=1?1:n*fact(n-1);
+const fact=(n:number):number=>n<=1?1:n*fact(n-1);
 const pois=(k:number,l:number)=>Math.exp(-l)*Math.pow(l,k)/fact(k);
 export function predictMarkets(home:TeamMetrics,away:TeamMetrics):MarketPrediction[]{
  const minGames=Math.min(home.played,away.played); const dq=clamp(minGames/10);
