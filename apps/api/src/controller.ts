@@ -1,0 +1,10 @@
+import {Body,Controller,Get,Post,Query} from '@nestjs/common';import {buildSystem,predictMarkets,settlementEligible,Selection} from '@fps/domain';import {FootballProvider,PrismaService} from './services';
+@Controller() export class AppController{constructor(private football:FootballProvider,private db:PrismaService){}
+@Get('health')health(){return {status:'ok',service:'fps-api',time:new Date().toISOString()}}
+@Get('fixtures')async fixtures(@Query('competition')c='SA',@Query('date')d?:string){return {source:'football-data.org',data:await this.football.fixtures(c,d)}}
+@Get('predictions')async predictions(@Query('competition')c='SA',@Query('date')d?:string){const [fx,st]=await Promise.all([this.football.fixtures(c,d),this.football.standings(c)]);const map=new Map(st.map(x=>[x.teamId,x]));return {source:'football-data.org',modelVersion:'poisson-bootstrap-v1',data:fx.map(f=>{const h=map.get(f.home.id),a=map.get(f.away.id);return {fixture:f,markets:h&&a?predictMarkets(h,a):[{market:'MODEL',selection:'NO_BET',probability:0,confidence:0,dataQuality:0,status:'NO_BET',reason:'Statistiche mancanti'}]}})}}
+@Post('systems/build')systems(@Body()b:{selections:Selection[];k:number;stake:number;budget?:number}){const r=buildSystem(b.selections,b.k,b.stake);return {...r,budget:b.budget??null,withinBudget:b.budget==null||r.cost<=b.budget}}
+@Post('bets')async createBet(@Body()b:{fixtureId:string;market:string;selection:string;stake:number;odds?:number;played:boolean;eventAt:string}){const bet=await this.db.bet.create({data:{...b,eventAt:new Date(b.eventAt)}});await this.db.auditEvent.create({data:{entityType:'Bet',entityId:bet.id,action:b.played?'REAL_BET_RECORDED':'PREDICTION_SAVED'}});return bet}
+@Get('bets')async bets(@Query('played')p?:string){return this.db.bet.findMany({where:p===undefined?{}:{played:p==='true'},orderBy:{createdAt:'desc'}})}
+@Post('settlement/eligible')async eligible(){const pending=await this.db.bet.findMany({where:{played:true,status:'PENDING'}});return pending.filter(b=>settlementEligible(b.eventAt,!!b.verifiedAt)).map(b=>({id:b.id,fixtureId:b.fixtureId,eventAt:b.eventAt}))}
+}

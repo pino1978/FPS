@@ -1,0 +1,1 @@
+import {Module} from '@nestjs/common';import {AppController} from './controller';import {FootballProvider,PrismaService} from './services';@Module({controllers:[AppController],providers:[FootballProvider,PrismaService]})export class AppModule{}

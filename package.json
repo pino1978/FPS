@@ -1,0 +1,13 @@
+{
+  "name": "football-prediction-system",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "concurrently \"npm run dev -w @fps/api\" \"npm run dev -w @fps/web\""
+  },
+  "devDependencies": {"concurrently":"^9.0.0","typescript":"^5.7.0"},
+  "engines": {"node": ">=22"}
+}

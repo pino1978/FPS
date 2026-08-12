@@ -1,0 +1,4 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+model Bet { id String @id @default(cuid()) fixtureId String market String selection String stake Float odds Float? played Boolean @default(false) status String @default("PENDING") eventAt DateTime createdAt DateTime @default(now()) verifiedAt DateTime? resultVersion String? @@index([played,status,eventAt]) }
+model AuditEvent { id String @id @default(cuid()) entityType String entityId String action String payload Json? createdAt DateTime @default(now()) }

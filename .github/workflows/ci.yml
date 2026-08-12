@@ -1,0 +1,28 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: {POSTGRES_USER: fps, POSTGRES_PASSWORD: fps, POSTGRES_DB: fps}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U fps" --health-interval=5s --health-timeout=5s --health-retries=10
+    env:
+      DATABASE_URL: postgresql://fps:fps@localhost:5432/fps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm}
+      - run: npm install
+      - run: npx prisma db push --schema apps/api/prisma/schema.prisma
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+  live-provider-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Live provider smoke is intentionally secret-gated.'

@@ -1,0 +1,29 @@
+export type TeamMetrics={played:number;points:number;goalsFor:number;goalsAgainst:number};
+export type MarketPrediction={market:string;selection:string;probability:number;confidence:number;dataQuality:number;status:'ACTIVE'|'NO_BET';reason?:string};
+const clamp=(n:number,min=0,max=1)=>Math.max(min,Math.min(max,n));
+const fact=(n:number)=>n<=1?1:n*fact(n-1);
+const pois=(k:number,l:number)=>Math.exp(-l)*Math.pow(l,k)/fact(k);
+export function predictMarkets(home:TeamMetrics,away:TeamMetrics):MarketPrediction[]{
+ const minGames=Math.min(home.played,away.played); const dq=clamp(minGames/10);
+ if(minGames<3)return [{market:'MODEL',selection:'NO_BET',probability:0,confidence:0.35,dataQuality:dq,status:'NO_BET',reason:'Campione insufficiente'}];
+ const hGF=home.goalsFor/home.played,hGA=home.goalsAgainst/home.played,aGF=away.goalsFor/away.played,aGA=away.goalsAgainst/away.played;
+ const lh=clamp((hGF+aGA)/2,0.15,3.8),la=clamp((aGF+hGA)/2,0.15,3.8);
+ let pH=0,pD=0,pA=0,pO25=0,pBTTS=0; for(let h=0;h<=7;h++)for(let a=0;a<=7;a++){const p=pois(h,lh)*pois(a,la);if(h>a)pH+=p;else if(h===a)pD+=p;else pA+=p;if(h+a>=3)pO25+=p;if(h>0&&a>0)pBTTS+=p;}
+ const conf=clamp(.45+.35*dq+.2*Math.min(1,Math.abs(pH-pA))); const active=conf>=.60&&dq>=.60;
+ const mk=(market:string,selection:string,p:number):MarketPrediction=>({market,selection,probability:clamp(p),confidence:conf,dataQuality:dq,status:active?'ACTIVE':'NO_BET',reason:active?undefined:'Confidence/Data Quality sotto soglia'});
+ const oneXtwo=[['1',pH],['X',pD],['2',pA]] as const; const best=oneXtwo.reduce((x,y)=>y[1]>x[1]?y:x);
+ return [mk('1X2',best[0],best[1]),mk('OVER_UNDER_2_5',pO25>=.5?'OVER 2.5':'UNDER 2.5',pO25>=.5?pO25:1-pO25),mk('BTTS',pBTTS>=.5?'GOAL':'NO GOAL',pBTTS>=.5?pBTTS:1-pBTTS)];
+}
+export type Selection={id:string;fixtureId:string;market:string;selection:string;odds?:number};
+export type Compatibility='COMPATIBLE'|'INCOMPATIBLE';
+export function compatibility(a:Selection,b:Selection):Compatibility{
+ if(a.fixtureId!==b.fixtureId)return 'COMPATIBLE';
+ const x=a.selection.toUpperCase(),y=b.selection.toUpperCase();
+ if((x==='GOAL'&&y==='NO GOAL')||(y==='GOAL'&&x==='NO GOAL'))return 'INCOMPATIBLE';
+ const ou=(s:string)=>s.match(/(OVER|UNDER)\s*(\d+(?:\.\d+)?)/); const ax=ou(x),by=ou(y);
+ if(ax&&by&&ax[1]!==by[1]){const ao=Number(ax[2]),bo=Number(by[2]);if((ax[1]==='OVER'&&ao>=bo)||(by[1]==='OVER'&&bo>=ao))return 'INCOMPATIBLE';}
+ return 'COMPATIBLE';
+}
+export function combinations<T>(items:T[],k:number):T[][]{if(k===0)return [[]];if(items.length<k)return [];return items.flatMap((v,i)=>combinations(items.slice(i+1),k-1).map(r=>[v,...r]));}
+export function buildSystem(selections:Selection[],k:number,stake:number){const invalid:Array<[string,string]>=[];for(let i=0;i<selections.length;i++)for(let j=i+1;j<selections.length;j++)if(compatibility(selections[i],selections[j])==='INCOMPATIBLE')invalid.push([selections[i].id,selections[j].id]);if(invalid.length)return {status:'INCOMPATIBLE' as const,invalid,combinations:[],cost:0};const combos=combinations(selections,k);return {status:'OK' as const,invalid:[],combinations:combos,cost:combos.length*stake};}
+export function settlementEligible(eventAt:Date,verified:boolean,now=new Date(),marginMinutes=150){return !verified&&now.getTime()>=eventAt.getTime()+marginMinutes*60000;}
