@@ -1,82 +1,92 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
 model PredictionRun {
-  id String @id @default(cuid())
-  fixtureId String
+  id           String               @id @default(cuid())
+  fixtureId    String
   modelVersion String
-  source String
-  asOf DateTime @default(now())
-  eventAt DateTime
-  snapshots PredictionSnapshot[]
-  @@index([fixtureId,eventAt])
+  source       String
+  asOf         DateTime             @default(now())
+  eventAt      DateTime
+  snapshots    PredictionSnapshot[]
+
+  @@index([fixtureId, eventAt])
 }
 
 model PredictionSnapshot {
-  id String @id @default(cuid())
-  runId String
-  run PredictionRun @relation(fields:[runId],references:[id],onDelete:Cascade)
-  market String
-  selection String
-  probability Float
-  confidence Float
-  dataQuality Float
-  status String
-  outcome String?
-  settledAt DateTime?
+  id            String        @id @default(cuid())
+  runId         String
+  run           PredictionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  market        String
+  selection     String
+  probability   Float
+  confidence    Float
+  dataQuality   Float
+  status        String
+  outcome       String?
+  settledAt     DateTime?
   resultVersion String?
-  createdAt DateTime @default(now())
-  @@index([status,outcome])
+  createdAt     DateTime      @default(now())
+
+  @@index([status, outcome])
 }
 
 model Bet {
-  id String @id @default(cuid())
-  fixtureId String
-  market String
-  selection String
-  stake Float
-  odds Float?
-  played Boolean @default(false)
-  status String @default("PENDING")
-  eventAt DateTime
-  createdAt DateTime @default(now())
-  verifiedAt DateTime?
+  id            String    @id @default(cuid())
+  fixtureId     String
+  market        String
+  selection     String
+  stake         Float
+  odds          Float?
+  played        Boolean   @default(false)
+  status        String    @default("PENDING")
+  eventAt       DateTime
+  createdAt     DateTime  @default(now())
+  verifiedAt    DateTime?
   resultVersion String?
-  @@index([played,status,eventAt])
+
+  @@index([played, status, eventAt])
 }
 
 model BettingSystem {
-  id String @id @default(cuid())
-  mode String
-  profile String?
-  budget Float
-  totalCost Float
-  played Boolean @default(false)
-  status String @default("PENDING")
-  createdAt DateTime @default(now())
+  id         String            @id @default(cuid())
+  mode       String
+  profile    String?
+  budget     Float
+  totalCost  Float
+  played     Boolean           @default(false)
+  status     String            @default("PENDING")
+  createdAt  DateTime          @default(now())
   selections SystemSelection[]
 }
 
 model SystemSelection {
-  id String @id @default(cuid())
-  systemId String
-  system BettingSystem @relation(fields:[systemId],references:[id],onDelete:Cascade)
-  fixtureId String
-  market String
-  selection String
-  eventAt DateTime
-  odds Float?
-  status String @default("PENDING")
-  verifiedAt DateTime?
+  id            String        @id @default(cuid())
+  systemId      String
+  system        BettingSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  fixtureId     String
+  market        String
+  selection     String
+  eventAt       DateTime
+  odds          Float?
+  status        String        @default("PENDING")
+  verifiedAt    DateTime?
   resultVersion String?
-  @@index([status,eventAt])
+
+  @@index([status, eventAt])
 }
 
 model AuditEvent {
-  id String @id @default(cuid())
+  id         String   @id @default(cuid())
   entityType String
-  entityId String
-  action String
-  payload Json?
-  createdAt DateTime @default(now())
+  entityId   String
+  action     String
+  payload    Json?
+  createdAt  DateTime @default(now())
 }
