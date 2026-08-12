@@ -6,6 +6,8 @@ export type Fixture={id:string;utcDate:string;status:string;home:{id:string;name
 export type Standing={teamId:string;played:number;points:number;goalsFor:number;goalsAgainst:number;formIndex?:number};
 export type MatchResult={id:string;status:string;home:number|null;away:number|null;lastUpdated?:string};
 export type Scorer={playerId:string;playerName:string;teamId:string;teamName:string;goals:number;assists:number;penalties:number};
+export type PlayerAvailability={playerName:string;teamName:string;type?:string;reason?:string};
+export type Enrichment={source:'API_FOOTBALL'|'UNAVAILABLE';providerFixtureId?:string;homeStarters:string[];awayStarters:string[];homeBench:string[];awayBench:string[];injuries:PlayerAvailability[];availabilityVerified:boolean};
 
 type CacheEntry={expiresAt:number;value:any};
 
@@ -40,7 +42,21 @@ export class FootballProvider {
 
   async matchDetails(matchId:string){return this.footballData(`/matches/${encodeURIComponent(matchId)}`,{'X-Unfold-Lineups':'true','X-Unfold-Goals':'true'},60_000);}
 
-  async result(matchId:string):Promise<MatchResult>{const m=await this.footballData(`/matches/${encodeURIComponent(matchId)}`,{},mStatusTtl(matchId));return {id:String(m.id),status:m.status,home:m.score?.fullTime?.home??null,away:m.score?.fullTime?.away??null,lastUpdated:m.lastUpdated};}
+  async enrichment(utcDate:string,homeName:string,awayName:string):Promise<Enrichment>{
+    if(!process.env.API_FOOTBALL_KEY)return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};
+    try{
+      const date=utcDate.slice(0,10);const fixtures=await this.apiFootball(`/fixtures?date=${date}&timezone=UTC`,5*60_000);const target=(fixtures.response||[]).find((x:any)=>sameTeam(x.teams?.home?.name,homeName)&&sameTeam(x.teams?.away?.name,awayName));
+      if(!target)return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};
+      const providerFixtureId=String(target.fixture.id);const [lineupResult,injuryResult]=await Promise.allSettled([this.apiFootball(`/fixtures/lineups?fixture=${providerFixtureId}`,2*60_000),this.apiFootball(`/injuries?fixture=${providerFixtureId}`,5*60_000)]);
+      const lineups=lineupResult.status==='fulfilled'?(lineupResult.value.response||[]):[];const injuries=injuryResult.status==='fulfilled'?(injuryResult.value.response||[]):[];
+      const homeLine=lineups.find((l:any)=>sameTeam(l.team?.name,homeName));const awayLine=lineups.find((l:any)=>sameTeam(l.team?.name,awayName));
+      return {source:'API_FOOTBALL',providerFixtureId,homeStarters:names(homeLine?.startXI),awayStarters:names(awayLine?.startXI),homeBench:names(homeLine?.substitutes),awayBench:names(awayLine?.substitutes),injuries:injuries.map((i:any)=>({playerName:i.player?.name||'',teamName:i.team?.name||'',type:i.player?.type,reason:i.player?.reason})).filter((i:PlayerAvailability)=>!!i.playerName),availabilityVerified:injuryResult.status==='fulfilled'};
+    }catch{return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};}
+  }
+
+  async result(matchId:string):Promise<MatchResult>{const m=await this.footballData(`/matches/${encodeURIComponent(matchId)}`,{},60_000);return {id:String(m.id),status:m.status,home:m.score?.fullTime?.home??null,away:m.score?.fullTime?.away??null,lastUpdated:m.lastUpdated};}
 }
 
-function mStatusTtl(_matchId:string){return 60_000;}
+function names(list:any[]|undefined){return (list||[]).map((x:any)=>x.player?.name).filter(Boolean);}
+function normalize(value:string|undefined){return (value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|ac|ssc|ss|calcio|club)\b/g,'').replace(/[^a-z0-9]/g,'');}
+function sameTeam(a:string|undefined,b:string|undefined){const x=normalize(a),y=normalize(b);return !!x&&!!y&&(x===y||x.includes(y)||y.includes(x));}
