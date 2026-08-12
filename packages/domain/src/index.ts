@@ -7,18 +7,20 @@ export function predictMarkets(home:TeamMetrics,away:TeamMetrics):MarketPredicti
  const minGames=Math.min(home.played,away.played); const dq=clamp(minGames/10);
  if(minGames<3)return [{market:'MODEL',selection:'NO_BET',probability:0,confidence:0.35,dataQuality:dq,status:'NO_BET',reason:'Campione insufficiente'}];
  const hGF=home.goalsFor/home.played,hGA=home.goalsAgainst/home.played,aGF=away.goalsFor/away.played,aGA=away.goalsAgainst/away.played;
- const lh=clamp((hGF+aGA)/2,0.15,3.8),la=clamp((aGF+hGA)/2,0.15,3.8);
- let pH=0,pD=0,pA=0,pO25=0,pBTTS=0; for(let h=0;h<=7;h++)for(let a=0;a<=7;a++){const p=pois(h,lh)*pois(a,la);if(h>a)pH+=p;else if(h===a)pD+=p;else pA+=p;if(h+a>=3)pO25+=p;if(h>0&&a>0)pBTTS+=p;}
+ const homeAdvantage=1.08; const lh=clamp(((hGF+aGA)/2)*homeAdvantage,0.15,3.8),la=clamp((aGF+hGA)/2,0.15,3.8);
+ let pH=0,pD=0,pA=0,pO15=0,pO25=0,pO35=0,pBTTS=0; for(let h=0;h<=8;h++)for(let a=0;a<=8;a++){const p=pois(h,lh)*pois(a,la);if(h>a)pH+=p;else if(h===a)pD+=p;else pA+=p;if(h+a>=2)pO15+=p;if(h+a>=3)pO25+=p;if(h+a>=4)pO35+=p;if(h>0&&a>0)pBTTS+=p;}
  const conf=clamp(.45+.35*dq+.2*Math.min(1,Math.abs(pH-pA))); const active=conf>=.60&&dq>=.60;
  const mk=(market:string,selection:string,p:number):MarketPrediction=>({market,selection,probability:clamp(p),confidence:conf,dataQuality:dq,status:active?'ACTIVE':'NO_BET',reason:active?undefined:'Confidence/Data Quality sotto soglia'});
  const oneXtwo=[['1',pH],['X',pD],['2',pA]] as const; const best=oneXtwo.reduce((x,y)=>y[1]>x[1]?y:x);
- return [mk('1X2',best[0],best[1]),mk('OVER_UNDER_2_5',pO25>=.5?'OVER 2.5':'UNDER 2.5',pO25>=.5?pO25:1-pO25),mk('BTTS',pBTTS>=.5?'GOAL':'NO GOAL',pBTTS>=.5?pBTTS:1-pBTTS)];
+ return [mk('1X2',best[0],best[1]),mk('OVER_UNDER_1_5',pO15>=.5?'OVER 1.5':'UNDER 1.5',pO15>=.5?pO15:1-pO15),mk('OVER_UNDER_2_5',pO25>=.5?'OVER 2.5':'UNDER 2.5',pO25>=.5?pO25:1-pO25),mk('OVER_UNDER_3_5',pO35>=.5?'OVER 3.5':'UNDER 3.5',pO35>=.5?pO35:1-pO35),mk('BTTS',pBTTS>=.5?'GOAL':'NO GOAL',pBTTS>=.5?pBTTS:1-pBTTS)];
 }
-export type Selection={id:string;fixtureId:string;market:string;selection:string;odds?:number};
+export type Selection={id:string;fixtureId:string;market:string;selection:string;odds?:number;probability?:number;confidence?:number;dataQuality?:number};
 export type Compatibility='COMPATIBLE'|'INCOMPATIBLE';
+const exclusiveMarkets=new Set(['1X2','BTTS','DRAW_NO_BET']);
 export function compatibility(a:Selection,b:Selection):Compatibility{
  if(a.fixtureId!==b.fixtureId)return 'COMPATIBLE';
  const x=a.selection.toUpperCase(),y=b.selection.toUpperCase();
+ if(a.market===b.market&&exclusiveMarkets.has(a.market)&&x!==y)return 'INCOMPATIBLE';
  if((x==='GOAL'&&y==='NO GOAL')||(y==='GOAL'&&x==='NO GOAL'))return 'INCOMPATIBLE';
  const ou=(s:string)=>s.match(/(OVER|UNDER)\s*(\d+(?:\.\d+)?)/); const ax=ou(x),by=ou(y);
  if(ax&&by&&ax[1]!==by[1]){const ao=Number(ax[2]),bo=Number(by[2]);if((ax[1]==='OVER'&&ao>=bo)||(by[1]==='OVER'&&bo>=ao))return 'INCOMPATIBLE';}
@@ -26,4 +28,13 @@ export function compatibility(a:Selection,b:Selection):Compatibility{
 }
 export function combinations<T>(items:T[],k:number):T[][]{if(k===0)return [[]];if(items.length<k)return [];return items.flatMap((v,i)=>combinations(items.slice(i+1),k-1).map(r=>[v,...r]));}
 export function buildSystem(selections:Selection[],k:number,stake:number){const invalid:Array<[string,string]>=[];for(let i=0;i<selections.length;i++)for(let j=i+1;j<selections.length;j++)if(compatibility(selections[i],selections[j])==='INCOMPATIBLE')invalid.push([selections[i].id,selections[j].id]);if(invalid.length)return {status:'INCOMPATIBLE' as const,invalid,combinations:[],cost:0};const combos=combinations(selections,k);return {status:'OK' as const,invalid:[],combinations:combos,cost:combos.length*stake};}
+export function optimizeSystem(selections:Selection[],budget:number,profile:'PRUDENT'|'BALANCED'|'AGGRESSIVE'='BALANCED'){
+ const valid=selections.filter(s=>(s.confidence??1)>=(profile==='PRUDENT'?.70:profile==='BALANCED'?.60:.50)&&(s.dataQuality??1)>=(profile==='PRUDENT'?.70:.60));
+ const ordered=[...valid].sort((a,b)=>((b.probability??0)*(b.confidence??1)*(b.dataQuality??1))-((a.probability??0)*(a.confidence??1)*(a.dataQuality??1)));
+ const k=Math.max(1,Math.min(profile==='PRUDENT'?2:profile==='BALANCED'?3:4,ordered.length)); if(!ordered.length)return {status:'NO_BET' as const,reason:'Nessuna selezione supera le soglie'};
+ const all=combinations(ordered,k).filter(c=>c.every((a,i)=>c.slice(i+1).every(b=>compatibility(a,b)==='COMPATIBLE'))); if(!all.length)return {status:'NO_BET' as const,reason:'Nessuna combinazione compatibile'};
+ const stake=Math.max(.1,Math.floor((budget/all.length)*100)/100); const selected=all.filter((_,i)=>i<Math.floor(budget/stake)); return {status:'OK' as const,k,stake,combinations:selected,cost:Number((selected.length*stake).toFixed(2)),selections:ordered};
+}
 export function settlementEligible(eventAt:Date,verified:boolean,now=new Date(),marginMinutes=150){return !verified&&now.getTime()>=eventAt.getTime()+marginMinutes*60000;}
+export type Score={home:number;away:number};
+export function settleMarket(market:string,selection:string,score:Score):'WIN'|'LOSS'|'UNSUPPORTED'{const s=selection.toUpperCase();if(market==='1X2'){const out=score.home>score.away?'1':score.home<score.away?'2':'X';return s===out?'WIN':'LOSS'}if(market==='BTTS'){const goal=score.home>0&&score.away>0;return (s==='GOAL')===goal?'WIN':'LOSS'}const m=s.match(/(OVER|UNDER)\s*(\d+(?:\.\d+)?)/);if(m&&market.startsWith('OVER_UNDER')){const total=score.home+score.away,line=Number(m[2]);return m[1]==='OVER'?(total>line?'WIN':'LOSS'):(total<line?'WIN':'LOSS')}return 'UNSUPPORTED'}
