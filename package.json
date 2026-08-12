@@ -3,10 +3,11 @@
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "dev": "concurrently \"npm run dev -w @fps/api\" \"npm run dev -w @fps/web\""
+    "build": "npm run build -w @fps/domain && npm run build -w @fps/api && npm run build -w @fps/web",
+    "typecheck": "npm run build -w @fps/domain && npm run typecheck -w @fps/api && npm run typecheck -w @fps/web",
+    "test": "npm run test -w @fps/domain && npm run test -w @fps/api && npm run test -w @fps/web",
+    "dev": "concurrently \"npm run dev -w @fps/api\" \"npm run dev -w @fps/web\"",
+    "db:push": "npm run db:push -w @fps/api"
   },
   "devDependencies": {"concurrently":"^9.0.0","typescript":"^5.7.0"},
   "engines": {"node": ">=22"}
