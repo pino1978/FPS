@@ -38,7 +38,8 @@ export class AppController {
       const injured=enrichment.injuries.some(i=>samePerson(i.playerName,s.playerName));
       const starterStatus=injured?'OUT':starters.some(n=>samePerson(n,s.playerName))?'CONFIRMED':bench.some(n=>samePerson(n,s.playerName))?'BENCH':'UNKNOWN';
       const expectedMinutes=expectedMinutesFor(starterStatus);
-      return predictAnytimeScorer({playerId:s.playerId,playerName:s.playerName,goals:s.goals,assists:s.assists,penalties:s.penalties,teamGoals:team.goalsFor,teamPlayed:team.played,teamGoalsFor:team.goalsFor,opponentGoalsAgainst:opp.goalsAgainst,opponentPlayed:opp.played,starterStatus,availabilityVerified:enrichment.availabilityVerified,role:s.position,expectedMinutes,teamExpectedGoals:isHome?teamPrediction.expectedGoalsHome:teamPrediction.expectedGoalsAway});
+      const prediction=predictAnytimeScorer({playerId:s.playerId,playerName:s.playerName,goals:s.goals,assists:s.assists,penalties:s.penalties,teamGoals:team.goalsFor,teamPlayed:team.played,teamGoalsFor:team.goalsFor,opponentGoalsAgainst:opp.goalsAgainst,opponentPlayed:opp.played,starterStatus,availabilityVerified:enrichment.availabilityVerified,role:s.position,expectedMinutes,teamExpectedGoals:isHome?teamPrediction.expectedGoalsHome:teamPrediction.expectedGoalsAway});
+      return {...prediction,teamSide:isHome?'HOME' as const:'AWAY' as const};
     }).sort((a,b)=>b.probability-a.probability);
     return {source:{scorers:'football-data.org',availability:enrichment.source},fixtureId,modelVersion:candidates[0]?.modelVersion??'scorer-impact-v2',availabilityVerified:enrichment.availabilityVerified,teamExpectedGoals:{home:teamPrediction.expectedGoalsHome,away:teamPrediction.expectedGoalsAway},data:candidates};
   }
