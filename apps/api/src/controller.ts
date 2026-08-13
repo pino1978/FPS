@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
-import { buildSystem, MODEL_VERSION, optimizeSystem, predictMarkets, settlementEligible, Selection } from '@fps/domain';
-import { predictAnytimeScorer } from '@fps/player-engine';
+import { buildSystem, MODEL_VERSION, optimizeSystem, predictFixture, predictMarkets, settlementEligible, Selection } from '@fps/domain';
+import { expectedMinutesFor, predictAnytimeScorer } from '@fps/player-engine';
 import { FootballProvider, PrismaService } from './services';
 import { SettlementService } from './settlement.service';
 
@@ -30,10 +30,17 @@ export class AppController {
     const homeId=String(details.homeTeam?.id),awayId=String(details.awayTeam?.id),homeName=details.homeTeam?.name||'',awayName=details.awayTeam?.name||'',utcDate=details.utcDate;
     const enrichment=await this.football.enrichment(utcDate,homeName,awayName);const standingsMap=new Map(standings.map(x=>[x.teamId,x]));const home=standingsMap.get(homeId),away=standingsMap.get(awayId);
     if(!home||!away)return {source:'UNAVAILABLE',reason:'Statistiche squadra mancanti',data:[]};
+    const teamPrediction=predictFixture(home,away);
     const fdHomeStarters=personNames(details.homeTeam?.lineup),fdAwayStarters=personNames(details.awayTeam?.lineup),fdHomeBench=personNames(details.homeTeam?.bench),fdAwayBench=personNames(details.awayTeam?.bench);
     const homeStarters=enrichment.homeStarters.length?enrichment.homeStarters:fdHomeStarters,awayStarters=enrichment.awayStarters.length?enrichment.awayStarters:fdAwayStarters,homeBench=enrichment.homeBench.length?enrichment.homeBench:fdHomeBench,awayBench=enrichment.awayBench.length?enrichment.awayBench:fdAwayBench;
-    const candidates=scorers.filter(s=>s.teamId===homeId||s.teamId===awayId).slice(0,16).map(s=>{const isHome=s.teamId===homeId,team=isHome?home:away,opp=isHome?away:home,starters=isHome?homeStarters:awayStarters,bench=isHome?homeBench:awayBench;const injured=enrichment.injuries.some(i=>samePerson(i.playerName,s.playerName));const starterStatus=injured?'OUT':starters.some(n=>samePerson(n,s.playerName))?'CONFIRMED':bench.some(n=>samePerson(n,s.playerName))?'BENCH':'UNKNOWN';return predictAnytimeScorer({playerId:s.playerId,playerName:s.playerName,goals:s.goals,teamGoals:team.goalsFor,teamPlayed:team.played,teamGoalsFor:team.goalsFor,opponentGoalsAgainst:opp.goalsAgainst,opponentPlayed:opp.played,starterStatus,availabilityVerified:enrichment.availabilityVerified})}).sort((a,b)=>b.probability-a.probability);
-    return {source:{scorers:'football-data.org',availability:enrichment.source},fixtureId,modelVersion:candidates[0]?.modelVersion??'scorer-share-v1',availabilityVerified:enrichment.availabilityVerified,data:candidates};
+    const candidates=scorers.filter(s=>s.teamId===homeId||s.teamId===awayId).slice(0,16).map(s=>{
+      const isHome=s.teamId===homeId,team=isHome?home:away,opp=isHome?away:home,starters=isHome?homeStarters:awayStarters,bench=isHome?homeBench:awayBench;
+      const injured=enrichment.injuries.some(i=>samePerson(i.playerName,s.playerName));
+      const starterStatus=injured?'OUT':starters.some(n=>samePerson(n,s.playerName))?'CONFIRMED':bench.some(n=>samePerson(n,s.playerName))?'BENCH':'UNKNOWN';
+      const expectedMinutes=expectedMinutesFor(starterStatus);
+      return predictAnytimeScorer({playerId:s.playerId,playerName:s.playerName,goals:s.goals,assists:s.assists,penalties:s.penalties,teamGoals:team.goalsFor,teamPlayed:team.played,teamGoalsFor:team.goalsFor,opponentGoalsAgainst:opp.goalsAgainst,opponentPlayed:opp.played,starterStatus,availabilityVerified:enrichment.availabilityVerified,role:s.position,expectedMinutes,teamExpectedGoals:isHome?teamPrediction.expectedGoalsHome:teamPrediction.expectedGoalsAway});
+    }).sort((a,b)=>b.probability-a.probability);
+    return {source:{scorers:'football-data.org',availability:enrichment.source},fixtureId,modelVersion:candidates[0]?.modelVersion??'scorer-impact-v2',availabilityVerified:enrichment.availabilityVerified,teamExpectedGoals:{home:teamPrediction.expectedGoalsHome,away:teamPrediction.expectedGoalsAway},data:candidates};
   }
 
   @Post('systems/build') systems(@Body() body:{selections:Selection[];k:number;stake:number;budget?:number}){const result=buildSystem(body.selections,body.k,body.stake);return {...result,budget:body.budget??null,withinBudget:body.budget==null||result.cost<=body.budget,stake:body.stake}}
