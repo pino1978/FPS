@@ -23,6 +23,23 @@ describe('SystemController validation',()=>{
     expect(()=>controller.build({selections:[selection],k:1,stake:1,fixedIds:['missing']})).toThrow('fixedIds contains an unknown selection');
   });
 
+  it('reports incompatibility before a pick is admitted to the system tray',()=>{
+    const result=controller.analyze({selections:[selection,{...selection,id:'b',selection:'X'}]});
+    expect(result.status).toBe('INCOMPATIBLE');
+    expect(result.incompatible).toEqual([{left:'a',right:'b'}]);
+  });
+
+  it('reports correlation separately from logical compatibility',()=>{
+    const result=controller.analyze({selections:[
+      {id:'a',fixtureId:'f1',market:'BTTS',selection:'GOAL'},
+      {id:'b',fixtureId:'f1',market:'OVER_UNDER_2_5',selection:'OVER 2.5'},
+    ]});
+    expect(result.status).toBe('COMPATIBLE');
+    expect(result.incompatible).toHaveLength(0);
+    expect(result.correlations[0].level).toBe('HIGH');
+    expect(result.maxCorrelation).toBeGreaterThanOrEqual(.7);
+  });
+
   it('blocks logically incompatible selections in backend system generation',()=>{
     const result=controller.build({selections:[selection,{...selection,id:'b',selection:'X'}],k:2,stake:1});
     expect(result.status).toBe('INCOMPATIBLE');
