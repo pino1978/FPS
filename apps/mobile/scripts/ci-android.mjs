@@ -1,0 +1,2 @@
+import{existsSync,chmodSync}from'node:fs';import{execFileSync}from'node:child_process';
+if(process.env.CI){const run=(cmd,args,cwd=process.cwd())=>execFileSync(cmd,args,{cwd,stdio:'inherit',env:{...process.env,JAVA_HOME:process.env.JAVA_HOME_21_X64||process.env.JAVA_HOME}});if(!existsSync('android'))run('npx',['cap','add','android']);run('npx',['cap','sync','android']);chmodSync('android/gradlew',0o755);run('./gradlew',['assembleDebug'],'android')}
