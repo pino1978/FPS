@@ -30,6 +30,7 @@ async function mockApi(page:any,{incompatible=false}:{incompatible?:boolean}={})
     if(url.includes('/v2/predictions'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(predictionPayload)});
     if(url.includes('/v2/matches/fixture-1/intelligence'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(intelligence)});
     if(url.includes('/player-markets'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(playerMarkets)});
+    if(url.includes('/v2/systems/analyze'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(incompatible?{status:'INCOMPATIBLE',reason:'Selezioni logicamente incompatibili',invalid:[['1','X']],correlations:[]}:{status:'OK',invalid:[],correlations:[]})});
     if(url.includes('/v2/systems/assist'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(incompatible?{status:'INCOMPATIBLE',reason:'Selezioni logicamente incompatibili',invalid:[['1','X']],combinations:[],cost:0}:{status:'OK',profile:'BALANCED',stake:1,cost:1,selections:[{id:'fixture-1|1X2|1',fixtureId:'fixture-1',market:'1X2',selection:'1',eventAt:'2026-08-14T18:45:00.000Z',probability:.46,confidence:.72,dataQuality:.85}],combinations:[[{id:'fixture-1|1X2|1'}]],coverage:{explanation:'Copertura e2e',guarantee:'Nessuna garanzia di profitto'}})});
     if(url.endsWith('/systems/save')&&method==='POST')return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({id:'system-e2e'})});
     if(url.includes('/v2/history/systems/system-e2e/execution')&&method==='POST'){systemPlayed=true;return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({id:'system-e2e',played:true})});}
@@ -88,6 +89,8 @@ test('played system → settlement → history critical flow',async({page})=>{
   await page.getByRole('button',{name:'Sistemi'}).first().click();
   await page.getByRole('button',{name:'Genera sistema'}).click();
   await expect(page.getByText('COMBINAZIONI')).toBeVisible();
+  await expect(page.getByText('STAKE / COMBO')).toBeVisible();
+  await expect(page.getByText('€1.00').first()).toBeVisible();
   await page.getByText('Quote di esecuzione · reale o paper').click();
   await page.getByRole('spinbutton',{name:'Quota effettiva 1'}).fill('1.90');
   await page.getByRole('button',{name:'L’ho giocato'}).click();
@@ -99,6 +102,17 @@ test('played system → settlement → history critical flow',async({page})=>{
   await expect(page.getByText('1 elementi elaborati · 1 fixture interrogate.')).toBeVisible();
   await expect(page.locator('strong.status-win')).toHaveText('WIN');
   await expect(page.getByRole('button',{name:'Prediction'})).toBeVisible();
+});
+
+test('system tray blocks incompatibility before generation',async({page})=>{
+  await mockApi(page,{incompatible:true});
+  await page.goto('/');
+  await page.getByRole('button',{name:'Aggiungi 1'}).click();
+  await page.getByRole('button',{name:'Aggiungi X'}).click();
+  await page.getByRole('button',{name:'Sistemi'}).first().click();
+  await expect(page.getByText('INCOMPATIBLE')).toBeVisible();
+  await expect(page.getByText('Selezioni logicamente incompatibili')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Rimuovi le incompatibilità'})).toBeDisabled();
 });
 
 test('paper trading dashboard keeps virtual bankroll separate',async({page})=>{
