@@ -53,7 +53,14 @@ jobs:
     env:
       API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
       FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+      LIVE_PROVIDER_SMOKE: '1'
+      PREDICTION_AVAILABILITY_FIXTURE_LIMIT: '0'
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
       - name: Require provider secrets
         run: |
           test -n "$API_FOOTBALL_KEY"
@@ -68,3 +75,7 @@ jobs:
           code=$(curl -sS -o /tmp/fd.json -w "%{http_code}" -H "X-Auth-Token: $FOOTBALL_DATA_TOKEN" "https://api.football-data.org/v4/competitions/SA/standings")
           test "$code" = "200"
           node -e "const x=require('/tmp/fd.json'); if(!x.standings) process.exit(1); console.log('football-data authenticated smoke: OK')"
+      - name: Generate Prisma client for API imports
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: Real Serie A adapter to prediction smoke
+        run: npx vitest run apps/api/src/live-serie-a.smoke.test.ts --maxWorkers=1 --minWorkers=1
