@@ -8,33 +8,48 @@ datasource db {
 }
 
 model Fixture {
-  id          String   @id
-  competition String
-  status      String
-  utcDate     DateTime
-  homeTeamId  String
-  homeTeam    String
-  awayTeamId  String
-  awayTeam    String
-  source      String
-  updatedAt   DateTime @updatedAt
-  createdAt   DateTime @default(now())
+  id             String   @id
+  competition    String
+  status         String
+  utcDate        DateTime
+  homeTeamId     String
+  homeTeam       String
+  awayTeamId     String
+  awayTeam       String
+  source         String
+  homeScore      Int?
+  awayScore      Int?
+  resultVerified Boolean  @default(false)
+  verifiedAt     DateTime?
+  resultVersion  String?
+  resultEvidence Json?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
 
   @@index([competition, utcDate])
   @@index([status, utcDate])
+  @@index([resultVerified, utcDate])
 }
 
 model TeamSnapshot {
-  id           String   @id @default(cuid())
-  competition  String
-  teamId       String
-  capturedAt   DateTime @default(now())
-  played       Int
-  points       Int
-  goalsFor     Int
-  goalsAgainst Int
-  formIndex    Float?
-  source       String
+  id               String   @id @default(cuid())
+  competition      String
+  teamId           String
+  capturedAt       DateTime @default(now())
+  played           Int
+  points           Int
+  goalsFor         Int
+  goalsAgainst     Int
+  formIndex        Float?
+  homePlayed       Int?
+  homePoints       Int?
+  homeGoalsFor     Int?
+  homeGoalsAgainst Int?
+  awayPlayed       Int?
+  awayPoints       Int?
+  awayGoalsFor     Int?
+  awayGoalsAgainst Int?
+  source           String
 
   @@index([competition, teamId, capturedAt])
 }
