@@ -1,6 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from './services';
 
+type PredictionMetricRow = {
+  market:string;
+  probability:number;
+  confidence:number;
+  outcome:'WIN'|'LOSS';
+  modelVersion:string;
+  competition:string;
+  capturedAt:Date;
+};
+type BetMetricRow = {
+  market:string;
+  competition:string;
+  bookmaker:string;
+  stake:number;
+  odds:number|null;
+  status:string;
+  playedAt:Date|null;
+};
+
 @Injectable()
 export class AnalyticsService {
   constructor(private db: PrismaService) {}
@@ -26,6 +45,9 @@ export class AnalyticsService {
     const brierScore = settled.length
       ? settled.reduce((sum, s) => sum + Math.pow(s.probability - (s.settlement?.outcome === 'WIN' ? 1 : 0), 2), 0) / settled.length
       : null;
+    const logLoss = settled.length
+      ? settled.reduce((sum, s) => sum + binaryLogLoss(s.probability, s.settlement?.outcome === 'WIN'), 0) / settled.length
+      : null;
     const hitRate = settled.length ? settled.filter((s) => s.settlement?.outcome === 'WIN').length / settled.length : null;
 
     return this.db.backtestRun.create({
@@ -41,6 +63,7 @@ export class AnalyticsService {
           methodology: 'walk-forward-immutable-prediction-replay',
           antiLeakage: 'asOf < eventAt AND inputSnapshot != null',
           eligiblePredictionRuns: eligible.length,
+          logLoss,
         },
       },
     });
@@ -57,11 +80,7 @@ export class AnalyticsService {
     });
     const systemsCount = await this.db.bettingSystem.count({ where: { simulated: true, played: false } });
     const stakeTotal = bets.reduce((sum, bet) => sum + bet.stake, 0);
-    const returnsTotal = bets.reduce((sum, bet) => {
-      if (bet.status === 'WIN') return sum + bet.stake * (bet.odds ?? 1);
-      if (bet.status === 'VOID') return sum + bet.stake;
-      return sum;
-    }, 0);
+    const returnsTotal = bets.reduce((sum, bet) => sum + betReturn(bet), 0);
     const profit = returnsTotal - stakeTotal;
     const bankrollFinal = input.bankrollInitial + profit;
     const roi = stakeTotal ? profit / stakeTotal : null;
@@ -73,11 +92,14 @@ export class AnalyticsService {
     let maxDrawdown = 0;
     for (const bet of bets) {
       bankroll -= bet.stake;
-      if (bet.status === 'WIN') bankroll += bet.stake * (bet.odds ?? 1);
-      if (bet.status === 'VOID') bankroll += bet.stake;
+      bankroll += betReturn(bet);
       peak = Math.max(peak, bankroll);
       if (peak > 0) maxDrawdown = Math.max(maxDrawdown, (peak - bankroll) / peak);
     }
+    const byMarket = groupBetMetrics(bets.map((bet) => ({
+      market:bet.market, competition:bet.competition ?? 'UNKNOWN', bookmaker:bet.bookmaker ?? 'UNKNOWN', stake:bet.stake,
+      odds:bet.odds, status:bet.status, playedAt:bet.playedAt,
+    })), (x) => x.market);
 
     return this.db.paperTradingRun.create({
       data: {
@@ -92,7 +114,7 @@ export class AnalyticsService {
         maxDrawdown,
         betsCount: bets.length,
         systemsCount,
-        parameters: { source: 'SIMULATED_ONLY', settlementEngine: 'shared', voidPolicy: 'stake-returned' },
+        parameters: { source: 'SIMULATED_ONLY', settlementEngine: 'shared', voidPolicy: 'stake-returned', byMarket },
       },
     });
   }
@@ -106,65 +128,128 @@ export class AnalyticsService {
       where: { settlement: { is: { outcome: { in: ['WIN', 'LOSS'] } } } },
       include: { settlement: true, run: true },
     });
-    const modelSample = snapshots.length;
-    const brierScore = modelSample
-      ? snapshots.reduce((sum, s) => sum + Math.pow(s.probability - (s.settlement?.outcome === 'WIN' ? 1 : 0), 2), 0) / modelSample
-      : null;
-    const hitRate = modelSample ? snapshots.filter((s) => s.settlement?.outcome === 'WIN').length / modelSample : null;
+    const fixtureIds = [...new Set(snapshots.map((s) => s.run.fixtureId))];
+    const fixtures = fixtureIds.length ? await this.db.fixture.findMany({ where: { id: { in: fixtureIds } }, select: { id:true, competition:true } }) : [];
+    const competitionByFixture = new Map(fixtures.map((x) => [x.id, x.competition]));
+    const predictionRows:PredictionMetricRow[] = snapshots.map((s) => ({
+      market:s.market,
+      probability:s.probability,
+      confidence:s.confidence,
+      outcome:s.settlement!.outcome as 'WIN'|'LOSS',
+      modelVersion:s.run.modelVersion,
+      competition:competitionByFixture.get(s.run.fixtureId) ?? 'UNKNOWN',
+      capturedAt:s.createdAt,
+    }));
+    const modelPerformance = summarizePredictions(predictionRows);
 
     const calibration = Array.from({ length: 10 }, (_, index) => {
       const min = index / 10, max = (index + 1) / 10;
-      const bucket = snapshots.filter((s) => s.probability >= min && (index === 9 ? s.probability <= max : s.probability < max));
+      const bucket = predictionRows.filter((s) => s.probability >= min && (index === 9 ? s.probability <= max : s.probability < max));
       return {
         range: `${Math.round(min * 100)}-${Math.round(max * 100)}%`,
         sample: bucket.length,
         predicted: bucket.length ? bucket.reduce((sum, s) => sum + s.probability, 0) / bucket.length : null,
-        observed: bucket.length ? bucket.filter((s) => s.settlement?.outcome === 'WIN').length / bucket.length : null,
+        observed: bucket.length ? bucket.filter((s) => s.outcome === 'WIN').length / bucket.length : null,
       };
     });
-
-    const byMarket = Object.values(snapshots.reduce<Record<string, { market:string;sample:number;wins:number;brier:number }>>((acc, s) => {
-      const row = acc[s.market] ?? { market: s.market, sample: 0, wins: 0, brier: 0 };
-      row.sample += 1;
-      if (s.settlement?.outcome === 'WIN') row.wins += 1;
-      row.brier += Math.pow(s.probability - (s.settlement?.outcome === 'WIN' ? 1 : 0), 2);
-      acc[s.market] = row;
-      return acc;
-    }, {})).map((row) => ({ market: row.market, sample: row.sample, hitRate: row.sample ? row.wins / row.sample : null, brierScore: row.sample ? row.brier / row.sample : null }));
 
     const real = await this.db.bet.findMany({
       where: { played: true, simulated: false, verificationStatus: 'VERIFIED', status: { in: ['WIN', 'LOSS', 'VOID'] } },
       orderBy: { playedAt: 'asc' },
     });
-    const stake = real.reduce((sum, bet) => sum + bet.stake, 0);
-    const returns = real.reduce((sum, bet) => bet.status === 'WIN' ? sum + bet.stake * (bet.odds ?? 1) : bet.status === 'VOID' ? sum + bet.stake : sum, 0);
-    const profit = returns - stake;
-    const decidedReal = real.filter((bet) => bet.status !== 'VOID');
-    const averageOdds = real.filter((bet) => bet.odds != null).length
-      ? real.filter((bet) => bet.odds != null).reduce((sum, bet) => sum + (bet.odds ?? 0), 0) / real.filter((bet) => bet.odds != null).length
-      : null;
-    let pnl = 0, peak = 0, maxDrawdown = 0;
-    for (const bet of real) {
-      pnl -= bet.stake;
-      if (bet.status === 'WIN') pnl += bet.stake * (bet.odds ?? 1);
-      if (bet.status === 'VOID') pnl += bet.stake;
-      peak = Math.max(peak, pnl);
-      maxDrawdown = Math.max(maxDrawdown, peak - pnl);
-    }
+    const betRows:BetMetricRow[] = real.map((bet) => ({
+      market:bet.market,
+      competition:bet.competition ?? 'UNKNOWN',
+      bookmaker:bet.bookmaker ?? 'UNKNOWN',
+      stake:bet.stake,
+      odds:bet.odds,
+      status:bet.status,
+      playedAt:bet.playedAt,
+    }));
+    const singles = summarizeBets(betRows);
+
+    const systems = await this.db.bettingSystem.findMany({
+      where: { played:true, simulated:false, verificationStatus:'VERIFIED' },
+      include: { selections:true, combinations:{ include:{ items:{ include:{ selection:true } } } } },
+      orderBy: { playedAt:'asc' },
+    });
+    const systemSummary = summarizeSystems(systems);
 
     return {
-      modelPerformance: { sample: modelSample, brierScore, hitRate, calibration, byMarket },
+      modelPerformance: {
+        ...modelPerformance,
+        calibration,
+        byMarket: groupPredictionMetrics(predictionRows, (x) => x.market),
+        byCompetition: groupPredictionMetrics(predictionRows, (x) => x.competition),
+        byConfidence: groupPredictionMetrics(predictionRows, (x) => confidenceBand(x.confidence)),
+        byModelVersion: groupPredictionMetrics(predictionRows, (x) => x.modelVersion),
+        byPeriod: groupPredictionMetrics(predictionRows, (x) => monthKey(x.capturedAt)),
+      },
       bettingPerformance: {
-        sample: real.length,
-        stake,
-        returns,
-        profit,
-        roi: stake ? profit / stake : null,
-        yield: stake ? profit / stake : null,
-        winRate: decidedReal.length ? decidedReal.filter((bet) => bet.status === 'WIN').length / decidedReal.length : null,
-        averageOdds,
-        maxDrawdown,
+        ...singles,
+        scope:'PLAYED_ONLY',
+        byMarket: groupBetMetrics(betRows, (x) => x.market),
+        byCompetition: groupBetMetrics(betRows, (x) => x.competition),
+        byBookmaker: groupBetMetrics(betRows, (x) => x.bookmaker),
+        byPeriod: groupBetMetrics(betRows, (x) => monthKey(x.playedAt)),
+        systemsVsSingles: { singles, systems:systemSummary },
       },
     };
   }
 }
+
+export function binaryLogLoss(probability:number, won:boolean){
+  const p=Math.max(1e-12,Math.min(1-1e-12,probability));
+  return -(won?Math.log(p):Math.log(1-p));
+}
+
+export function summarizePredictions(rows:PredictionMetricRow[]){
+  if(!rows.length)return {sample:0,brierScore:null,logLoss:null,hitRate:null};
+  const brierScore=rows.reduce((sum,row)=>sum+Math.pow(row.probability-(row.outcome==='WIN'?1:0),2),0)/rows.length;
+  const logLoss=rows.reduce((sum,row)=>sum+binaryLogLoss(row.probability,row.outcome==='WIN'),0)/rows.length;
+  const hitRate=rows.filter((row)=>row.outcome==='WIN').length/rows.length;
+  return {sample:rows.length,brierScore,logLoss,hitRate};
+}
+
+export function summarizeBets(rows:BetMetricRow[]){
+  const stake=rows.reduce((sum,row)=>sum+row.stake,0);
+  const returns=rows.reduce((sum,row)=>sum+betReturn(row),0);
+  const profit=returns-stake;
+  const decided=rows.filter((row)=>row.status==='WIN'||row.status==='LOSS');
+  const oddsRows=rows.filter((row)=>row.odds!=null);
+  let pnl=0,peak=0,maxDrawdown=0;
+  for(const row of rows){pnl-=row.stake;pnl+=betReturn(row);peak=Math.max(peak,pnl);maxDrawdown=Math.max(maxDrawdown,peak-pnl)}
+  return {
+    sample:rows.length,stake,returns,profit,roi:stake?profit/stake:null,yield:stake?profit/stake:null,
+    winRate:decided.length?decided.filter((row)=>row.status==='WIN').length/decided.length:null,
+    averageOdds:oddsRows.length?oddsRows.reduce((sum,row)=>sum+(row.odds??0),0)/oddsRows.length:null,maxDrawdown,
+  };
+}
+
+function groupPredictionMetrics(rows:PredictionMetricRow[],key:(row:PredictionMetricRow)=>string){
+  const groups=new Map<string,PredictionMetricRow[]>();
+  for(const row of rows){const k=key(row);groups.set(k,[...(groups.get(k)??[]),row])}
+  return [...groups.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([group,items])=>({group,...summarizePredictions(items)}));
+}
+function groupBetMetrics(rows:BetMetricRow[],key:(row:BetMetricRow)=>string){
+  const groups=new Map<string,BetMetricRow[]>();
+  for(const row of rows){const k=key(row);groups.set(k,[...(groups.get(k)??[]),row])}
+  return [...groups.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([group,items])=>({group,...summarizeBets(items)}));
+}
+function summarizeSystems(systems:any[]){
+  let stake=0,returns=0,financiallySettled=0,wins=0,losses=0,voids=0;
+  for(const system of systems)for(const combo of system.combinations??[]){
+    stake+=Number(combo.stake||0);
+    if(combo.status==='WIN'){
+      const odds=(combo.items??[]).map((item:any)=>item.selection?.odds).filter((x:any)=>x!=null);
+      if(odds.length===(combo.items??[]).length){returns+=Number(combo.stake||0)*odds.reduce((product:number,x:number)=>product*Number(x),1);financiallySettled++;}
+      wins++;
+    }else if(combo.status==='LOSS'){losses++;financiallySettled++;}
+    else if(combo.status==='VOID'){returns+=Number(combo.stake||0);voids++;financiallySettled++;}
+  }
+  const profit=returns-stake;const decided=wins+losses;
+  return {systems:systems.length,combinations:wins+losses+voids,financiallySettled,stake,returns,profit,roi:stake?profit/stake:null,yield:stake?profit/stake:null,winRate:decided?wins/decided:null};
+}
+function betReturn(row:{status:string;stake:number;odds:number|null}){return row.status==='WIN'?row.stake*(row.odds??1):row.status==='VOID'?row.stake:0}
+function confidenceBand(value:number){const start=Math.min(90,Math.floor(Math.max(0,value)*10)*10);return `${start}-${start+10}%`}
+function monthKey(value:Date|null){return value?value.toISOString().slice(0,7):'UNKNOWN'}
