@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {binaryLogLoss,summarizeBets,summarizePredictions} from './analytics.service';
+import {binaryLogLoss,summarizeBets,summarizePredictions,summarizeSystems} from './analytics.service';
 
 describe('analytics metrics',()=>{
   it('computes finite log loss and rewards calibrated correct probabilities',()=>{
@@ -31,5 +31,18 @@ describe('analytics metrics',()=>{
     expect(summary.profit).toBe(5);
     expect(summary.roi).toBe(.25);
     expect(summary.winRate).toBe(.5);
+  });
+
+  it('uses unit odds for a void leg in a winning real system',()=>{
+    const summary=summarizeSystems([{combinations:[{
+      status:'WIN',stake:5,items:[
+        {selection:{status:'WIN',odds:2}},
+        {selection:{status:'VOID',odds:1.8}},
+      ],
+    }]}]);
+    expect(summary.stake).toBe(5);
+    expect(summary.returns).toBe(10);
+    expect(summary.profit).toBe(5);
+    expect(summary.financiallySettled).toBe(1);
   });
 });
