@@ -27,12 +27,23 @@ describe('paper trading report',()=>{
   it('calculates a system return from actual simulated selection odds',()=>{
     const report=computePaperReport(100,[],[{
       status:'WIN',verificationStatus:'VERIFIED',createdAt:new Date(),selections:[{market:'1X2',status:'WIN'}],
-      combinations:[{status:'WIN',stake:5,items:[{selection:{odds:2}},{selection:{odds:1.5}}]}],
+      combinations:[{status:'WIN',stake:5,items:[{selection:{status:'WIN',odds:2}},{selection:{status:'WIN',odds:1.5}}]}],
     }]);
     expect(report.stakeTotal).toBe(5);
     expect(report.returnsTotal).toBe(15);
     expect(report.profit).toBe(10);
     expect(report.bankrollFinal).toBe(110);
     expect(report.systemsCount).toBe(1);
+  });
+
+  it('prices a void leg at unit odds inside an otherwise winning system',()=>{
+    const report=computePaperReport(100,[],[{
+      status:'WIN',verificationStatus:'VERIFIED',createdAt:new Date(),
+      selections:[{market:'1X2',status:'WIN'},{market:'BTTS',status:'VOID'}],
+      combinations:[{status:'WIN',stake:5,items:[{selection:{status:'WIN',odds:2}},{selection:{status:'VOID',odds:1.8}}]}],
+    }]);
+    expect(report.stakeTotal).toBe(5);
+    expect(report.returnsTotal).toBe(10);
+    expect(report.profit).toBe(5);
   });
 });
