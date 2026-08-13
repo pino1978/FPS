@@ -8,6 +8,7 @@ export type MatchResult={id:string;status:string;home:number|null;away:number|nu
 export type Scorer={playerId:string;playerName:string;teamId:string;teamName:string;goals:number;assists:number;penalties:number};
 export type PlayerAvailability={playerName:string;teamName:string;type?:string;reason?:string};
 export type Enrichment={source:'API_FOOTBALL'|'UNAVAILABLE';providerFixtureId?:string;homeStarters:string[];awayStarters:string[];homeBench:string[];awayBench:string[];injuries:PlayerAvailability[];availabilityVerified:boolean};
+export type OfferedOdd={bookmaker:string;market:string;selection:string;odds:number;updatedAt?:string};
 
 type CacheEntry={expiresAt:number;value:any};
 
@@ -54,6 +55,20 @@ export class FootballProvider {
     }catch{return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};}
   }
 
+  async odds(providerFixtureId:string):Promise<OfferedOdd[]>{
+    if(!process.env.API_FOOTBALL_KEY)return [];
+    try{
+      const data=await this.apiFootball(`/odds?fixture=${encodeURIComponent(providerFixtureId)}`,3*60*60_000);
+      const rows:OfferedOdd[]=[];
+      for(const fixture of data.response||[])for(const bookmaker of fixture.bookmakers||[])for(const bet of bookmaker.bets||[])for(const value of bet.values||[]){
+        const mapped=mapOdd(bet.name,value.value);
+        const odds=Number(value.odd);
+        if(mapped&&Number.isFinite(odds)&&odds>1)rows.push({bookmaker:bookmaker.name||String(bookmaker.id),market:mapped.market,selection:mapped.selection,odds,updatedAt:fixture.update});
+      }
+      return rows;
+    }catch{return [];}
+  }
+
   async result(matchId:string):Promise<MatchResult>{
     const m=await this.footballData(`/matches/${encodeURIComponent(matchId)}`,{'X-Unfold-Goals':'true'},60_000);
     const scorers=(m.goals||[]).map((g:any)=>g.scorer?.name||g.player?.name).filter(Boolean);
@@ -61,6 +76,7 @@ export class FootballProvider {
   }
 }
 
+function mapOdd(name:string|undefined,value:string|undefined){const n=(name||'').toLowerCase(),v=(value||'').trim();if(n.includes('match winner')){if(/^home$/i.test(v))return {market:'1X2',selection:'1'};if(/^draw$/i.test(v))return {market:'1X2',selection:'X'};if(/^away$/i.test(v))return {market:'1X2',selection:'2'};}if(n.includes('goals over/under')&&!n.includes('half')){const m=v.match(/(Over|Under)\s*(\d+(?:\.\d+)?)/i);if(m)return {market:`OVER_UNDER_${m[2].replace('.','_')}`,selection:`${m[1].toUpperCase()} ${m[2]}`};}if(n.includes('both teams')||n.includes('both team')){if(/^yes$/i.test(v))return {market:'BTTS',selection:'GOAL'};if(/^no$/i.test(v))return {market:'BTTS',selection:'NO GOAL'};}return null;}
 function names(list:any[]|undefined){return (list||[]).map((x:any)=>x.player?.name).filter(Boolean);}
 function normalize(value:string|undefined){return (value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|ac|ssc|ss|calcio|club)\b/g,'').replace(/[^a-z0-9]/g,'');}
 function sameTeam(a:string|undefined,b:string|undefined){const x=normalize(a),y=normalize(b);return !!x&&!!y&&(x===y||x.includes(y)||y.includes(x));}
