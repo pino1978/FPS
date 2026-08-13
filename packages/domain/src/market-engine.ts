@@ -68,9 +68,16 @@ export function scoreProbabilityMatrix(lambdaHome: number, lambdaAway: number, m
       rawSum += probability;
     }
   }
-  const residualProbability = Math.max(0, 1 - rawSum);
+
+  // The finite matrix truncates the Poisson tails above maxGoals. Markets are
+  // derived from a normalized matrix so their mutually-exclusive partitions
+  // remain coherent and sum to 1. Once that missing tail has been redistributed
+  // by normalization, there is no residual probability left in the returned
+  // matrix. Keeping the pre-normalization tail here would double-count mass.
   const normalizer = rawSum > 0 ? rawSum : 1;
   const cells = raw.map((cell) => ({ ...cell, probability: cell.probability / normalizer }));
+  const normalizedSum = cells.reduce((sum, cell) => sum + cell.probability, 0);
+  const residualProbability = Math.max(0, 1 - normalizedSum);
   return { cells, residualProbability };
 }
 
