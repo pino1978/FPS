@@ -10,6 +10,8 @@ L'SRS richiede che prediction storiche e relativi input restino immutabili/versi
 
 Scrivere l'esito direttamente nello stesso record della prediction renderebbe lo snapshot storico mutabile. Recuperare quote e risultati ripetutamente consumerebbe inutilmente il free tier e aumenterebbe il rischio di inconsistenza.
 
+Lo storico richiede inoltre che una giocata o una selezione di sistema continui a mostrare la prediction originaria anche dopo nuove rigenerazioni del modello. Ricostruire tale contesto interrogando ogni volta "l'ultima prediction" introdurrebbe ambiguità temporale.
+
 ## Alternative considerate
 
 ### A. Aggiornare direttamente `PredictionSnapshot`
@@ -51,6 +53,28 @@ Scrivere l'esito direttamente nello stesso record della prediction renderebbe lo
 
 Il dettaglio partita richiede le quote soltanto quando l'utente apre la sezione Value. Le offerte disponibili vengono normalizzate e memorizzate in `OddsSnapshot` con fingerprint univoco, provider timestamp e captured timestamp.
 
+### E. Ricostruire la prediction originaria dinamicamente dallo storico prediction
+
+**Vantaggi**
+- nessuna duplicazione nei record bet/system.
+
+**Svantaggi**
+- una nuova prediction per la stessa fixture/mercato rende ambiguo quale snapshot fosse quello visto al momento della giocata;
+- query più complesse e maggiore rischio di associare uno snapshot posteriore alla decisione dell'utente.
+
+### F. Proiezione immutabile della prediction originaria nella bet/selezione sistema — scelta
+
+Quando una bet o un sistema vengono salvati, il backend individua l'ultimo `PredictionSnapshot` compatibile generato prima del kickoff e copia nel record storico i soli campi necessari alla lettura/audit: probability, confidence, data quality, fair odds, model version e captured timestamp. Lo snapshot sorgente resta la source of truth immutabile; la proiezione serve a congelare il contesto decisionale.
+
+**Vantaggi**
+- storico stabile anche dopo nuove prediction;
+- lettura efficiente;
+- nessun rischio di associare retroattivamente una prediction successiva.
+
+**Svantaggi**
+- duplicazione controllata di alcuni campi;
+- necessità di mantenere esplicito che i campi `origin*` sono una proiezione e non una seconda source of truth.
+
 ## Decisione
 
 1. Le prediction v2 sono snapshot immutabili.
@@ -62,6 +86,8 @@ Il dettaglio partita richiede le quote soltanto quando l'utente apre la sezione 
 7. Ogni quota disponibile viene archiviata come `OddsSnapshot` append-only; non viene sovrascritta.
 8. Se il provider gratuito non offre quote, `Value = UNAVAILABLE`; nessuna quota viene inventata.
 9. Fair Odds derivano esclusivamente dalla probabilità del modello; bookmaker odds, Edge ed EV rimangono campi distinti.
+10. Bet e `SystemSelection` congelano una proiezione `origin*` della prediction disponibile prima del kickoff; questa proiezione non viene aggiornata durante execution/settlement.
+11. Lo storico prediction resta interrogabile direttamente dagli snapshot immutabili, separatamente da bet reali e paper trading.
 
 ## Impatti
 
@@ -70,7 +96,10 @@ Il dettaglio partita richiede le quote soltanto quando l'utente apre la sezione 
 - Value storico può essere riprodotto solo quando esiste uno snapshot quote valido.
 - Il consumo delle API gratuite è ridotto tramite cache, caricamento on-demand e riuso del risultato fixture.
 - I campi legacy `outcome/settledAt/resultVersion` restano temporaneamente nello schema soltanto per backward compatibility; il flusso v2 non li scrive e la source of truth è `PredictionSettlement`.
+- I campi `origin*` di Bet/SystemSelection sono denormalizzazioni immutabili del contesto decisionale e non sostituiscono `PredictionSnapshot`.
 
 ## Conseguenze operative
 
 Qualunque nuova feature che richieda dati successivi al kickoff deve registrarli in una struttura di osservazione/settlement separata e non modificare lo snapshot originario della prediction.
+
+Qualunque modifica all'esecuzione di una bet (`PLAYED`, `SIMULATED`, `NOT_PLAYED`, bookmaker, stake, quota effettiva) non deve riscrivere i campi `origin*` già acquisiti.
