@@ -1,10 +1,10 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { evaluateValue, predictFixture, StructuredMarket } from '@fps/domain';
-import { FootballProvider } from './services';
+import { FootballProvider, PrismaService } from './services';
 
 @Controller('v2')
 export class ValueController {
-  constructor(private football: FootballProvider) {}
+  constructor(private football: FootballProvider, private db: PrismaService) {}
 
   @Get('value')
   async value(@Query('fixtureId') fixtureId: string, @Query('competition') competition = 'SA') {
@@ -23,12 +23,34 @@ export class ValueController {
       return { source: 'UNAVAILABLE', reason: 'Fixture non mappabile sul provider quote', data: valueRows(model.markets, []) };
     }
     const odds = await this.football.odds(enrichment.providerFixtureId);
+    if (odds.length) {
+      await this.db.oddsSnapshot.createMany({
+        data: odds.map((odd) => ({
+          fingerprint: [fixtureId,enrichment.providerFixtureId,odd.bookmaker,odd.market,odd.selection,odd.odds,odd.updatedAt||'unknown'].join('|'),
+          fixtureId,
+          providerFixtureId: enrichment.providerFixtureId,
+          bookmaker: odd.bookmaker,
+          market: odd.market,
+          selection: odd.selection,
+          odds: odd.odds,
+          providerUpdatedAt: parseDate(odd.updatedAt),
+          source: 'API_FOOTBALL_FREE',
+        })),
+        skipDuplicates: true,
+      });
+    }
     return {
       source: odds.length ? 'API_FOOTBALL_FREE' : 'UNAVAILABLE',
       providerFixtureId: enrichment.providerFixtureId,
       reason: odds.length ? undefined : 'Nessuna quota pre-match disponibile nel free tier per questa fixture',
       data: valueRows(model.markets, odds),
     };
+  }
+
+  @Get('odds-history')
+  async history(@Query('fixtureId') fixtureId: string) {
+    if (!fixtureId) throw new Error('fixtureId required');
+    return this.db.oddsSnapshot.findMany({ where: { fixtureId }, orderBy: { capturedAt: 'desc' }, take: 500 });
   }
 }
 
@@ -53,3 +75,4 @@ function valueRows(markets: StructuredMarket[], odds: Array<{bookmaker:string;ma
       };
     });
 }
+function parseDate(value?:string){if(!value)return undefined;const d=new Date(value);return Number.isFinite(d.getTime())?d:undefined;}
