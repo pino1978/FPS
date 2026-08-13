@@ -32,13 +32,14 @@ export class FootballProvider {
     if(state.openedUntil>now)throw new Error(`${provider} circuit open`);
     let lastError:unknown;
     for(let attempt=0;attempt<3;attempt++){
-      try{
-        const r=await fetch(url,{headers});
-        if(r.ok){this.circuits.set(provider,{failures:0,openedUntil:0});return r.json() as Promise<any>;}
-        const retryable=r.status===429||r.status>=500;
-        if(!retryable)throw new Error(`${provider} ${r.status}`);
-        lastError=new Error(`${provider} ${r.status}`);
-      }catch(error){lastError=error;}
+      let response:Response;
+      try{response=await fetch(url,{headers});}
+      catch(error){lastError=error;if(attempt<2){await sleep(250*Math.pow(2,attempt));continue;}break;}
+      if(response.ok){this.circuits.set(provider,{failures:0,openedUntil:0});return response.json() as Promise<any>;}
+      const error=new Error(`${provider} ${response.status}`);
+      const retryable=response.status===429||response.status>=500;
+      if(!retryable)throw error;
+      lastError=error;
       if(attempt<2)await sleep(250*Math.pow(2,attempt));
     }
     const failures=state.failures+1;this.circuits.set(provider,{failures,openedUntil:failures>=5?Date.now()+60_000:0});
