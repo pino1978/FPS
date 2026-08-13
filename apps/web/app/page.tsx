@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import HistoryDashboard from './HistoryDashboard';
 import MatchIntelligence from './MatchIntelligence';
 import StatsDashboard from './StatsDashboard';
-import SystemBuilderPanel from './SystemBuilderPanel';
+import SystemBuilderPanel, { type SystemPick } from './SystemBuilderPanel';
 
 type Market = {
   market: string;
@@ -15,6 +15,11 @@ type Market = {
   fairOdds?: number | null;
   status: 'ACTIVE' | 'NO_BET';
   reason?: string;
+  period?: 'FT' | 'HT';
+  metric?: string;
+  operator?: string;
+  threshold?: number;
+  outcome?: string;
 };
 type Fixture = {
   id: string;
@@ -24,18 +29,7 @@ type Fixture = {
   away: { id?: string; name: string };
 };
 type Row = { fixture: Fixture; markets: Market[]; expectedGoalsHome?: number | null; expectedGoalsAway?: number | null };
-type Pick = {
-  id: string;
-  fixtureId: string;
-  market: string;
-  selection: string;
-  eventAt: string;
-  probability: number;
-  confidence: number;
-  dataQuality: number;
-  fairOdds?: number | null;
-  fixed?: boolean;
-};
+type Pick = SystemPick;
 type Tab = 'Pronostici' | 'Partite' | 'Sistemi' | 'I miei sistemi' | 'Storico' | 'Statistiche';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -45,6 +39,7 @@ const json = async (url: string, init?: RequestInit) => {
   if (!response.ok) throw new Error(body?.message || `${response.status} ${response.statusText}`);
   return body;
 };
+const post = (url: string, body: unknown) => json(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 export default function Home() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -68,10 +63,8 @@ export default function Home() {
     () => rows.flatMap((row) => featured(row).filter((market) => market.status === 'ACTIVE').map((market) => toPick(row, market))),
     [rows],
   );
-  const add = (row: Row, market: Market) => {
-    const pick = toPick(row, market);
-    setBag((current) => current.some((x) => x.id === pick.id) ? current : [...current, pick]);
-  };
+  const addPick = (pick: Pick) => setBag((current) => current.some((x) => x.id === pick.id) ? current : [...current, pick]);
+  const add = (row: Row, market: Market) => addPick(toPick(row, market));
 
   const tabs: Tab[] = ['Pronostici', 'Partite', 'Sistemi', 'I miei sistemi', 'Storico', 'Statistiche'];
   return <div className="shell">
@@ -85,7 +78,7 @@ export default function Home() {
         <div><small>FOOTBALL INTELLIGENCE · DATI REALI</small><h1>{detail ? 'Dettaglio partita' : tab}</h1></div>
         <div className="headActions"><span className="live">● LIVE DATA</span>{detail && <button className="ghost" onClick={() => setDetail(null)}>← Indietro</button>}</div>
       </header>
-      {detail ? <MatchDetail row={detail} bag={bag} add={add} /> : <>
+      {detail ? <MatchDetail row={detail} bag={bag} add={add} addPick={addPick} /> : <>
         {tab === 'Pronostici' && <Predictions rows={rows} loading={loading} error={error} bag={bag} add={add} open={setDetail} retry={load} />}
         {tab === 'Partite' && <Matches rows={rows} open={setDetail} />}
         {tab === 'Sistemi' && <SystemBuilderPanel bag={bag} setBag={setBag} available={available} />}
@@ -126,7 +119,7 @@ function Matches({ rows, open }: { rows: Row[]; open: (row: Row) => void }) {
   return <div className="panel"><div className="sectionhead"><div><small>FIXTURE</small><h2>Partite</h2><p>Orari normalizzati e dati acquisiti dai provider gratuiti configurati.</p></div></div>{rows.length ? rows.map((row) => <button className="matchLine" key={row.fixture.id} onClick={() => open(row)}><span><b>{row.fixture.home.name} — {row.fixture.away.name}</b><small>{new Date(row.fixture.utcDate).toLocaleString('it-IT')}</small></span><span>Dettaglio →</span></button>) : <Empty title="Nessuna fixture" text="Avvia l’ingestion o riprova più tardi." />}</div>;
 }
 
-function MatchDetail({ row, bag, add }: { row: Row; bag: Pick[]; add: (row: Row, market: Market) => void }) {
+function MatchDetail({ row, bag, add, addPick }: { row: Row; bag: Pick[]; add: (row: Row, market: Market) => void; addPick: (pick: Pick) => void }) {
   const [category, setCategory] = useState('Esito');
   const [players, setPlayers] = useState<any[] | null>(null);
   const [playerError, setPlayerError] = useState('');
@@ -157,16 +150,20 @@ function MatchDetail({ row, bag, add }: { row: Row; bag: Pick[]; add: (row: Row,
     <MatchIntelligence fixtureId={row.fixture.id} />
     <div className="tabs marketTabs">{categories.map((name) => <button className={category === name ? 'on' : ''} key={name} onClick={() => select(name)}>{name}</button>)}</div>
     <section className="panel"><div className="sectionhead"><div><small>{category.toUpperCase()}</small><h2>{category === 'Marcatori' ? 'Probabilità giocatore' : category === 'Value' ? 'Value & quote' : 'Mercati e probabilità'}</h2></div></div>
-      {category === 'Marcatori' ? <PlayerMarkets players={players} loading={loadingPlayers} error={playerError} /> : category === 'Value' ? <ValueMarkets rows={value} source={valueSource} reason={valueReason} loading={loadingValue} /> : shown.length ? shown.map((market) => <MarketRow key={`${market.market}-${market.selection}`} row={row} market={market} added={bag.some((pick) => pick.id === pickId(row.fixture.id, market))} add={add} full />) : <Empty title="Mercato non disponibile" text="Nessun mercato di questa categoria è modellabile con i dati correnti." />}
+      {category === 'Marcatori' ? <PlayerMarkets row={row} players={players} loading={loadingPlayers} error={playerError} bag={bag} addPick={addPick} /> : category === 'Value' ? <ValueMarkets rows={value} source={valueSource} reason={valueReason} loading={loadingValue} /> : shown.length ? shown.map((market) => <MarketRow key={`${market.market}-${market.selection}`} row={row} market={market} added={bag.some((pick) => pick.id === pickId(row.fixture.id, market))} add={add} full />) : <Empty title="Mercato non disponibile" text="Nessun mercato di questa categoria è modellabile con i dati correnti." />}
     </section>
   </>;
 }
 
-function PlayerMarkets({ players, loading, error }: { players: any[] | null; loading: boolean; error: string }) {
+function PlayerMarkets({ row, players, loading, error, bag, addPick }: { row: Row; players: any[] | null; loading: boolean; error: string; bag: Pick[]; addPick: (pick: Pick) => void }) {
   if (loading) return <p className="muted">Caricamento lineup, indisponibili e marcatori…</p>;
   if (error) return <div className="notice"><b>Mercato non disponibile</b><span>{error}</span></div>;
   if (!players?.length) return <Empty title="NO_BET giocatori" text="Lineup o dati giocatore non sufficienti per una prediction affidabile." />;
-  return <>{players.map((player) => <div className={'market ' + (player.status === 'NO_BET' ? 'off' : '')} key={player.playerId}><div><small>ANYTIME SCORER</small><strong>{player.playerName}</strong><span>Conf. {pct(player.confidence)} · DQ {pct(player.dataQuality)} · {player.playerImpact?.role || 'ruolo n/d'} · {player.playerImpact?.expectedMinutes ?? '—'} min attesi</span>{player.reason && <span>{player.reason}</span>}</div><b>{pct(player.probability)}</b><span className="valueBadge">{player.status}</span></div>)}</>;
+  return <>{players.map((player) => {
+    const pick: Pick = { id: `${row.fixture.id}|ANYTIME_SCORER|${player.playerId}`, fixtureId: row.fixture.id, market: 'ANYTIME_SCORER', selection: player.selection || `${player.playerName} segna`, eventAt: row.fixture.utcDate, probability: player.probability, confidence: player.confidence, dataQuality: player.dataQuality, fairOdds: player.fairOdds, period: 'FT', teamSide: player.teamSide, playerId: player.playerId };
+    const added = bag.some((x) => x.id === pick.id);
+    return <div className={'market ' + (player.status === 'NO_BET' ? 'off' : '')} key={player.playerId}><div><small>ANYTIME SCORER</small><strong>{player.playerName}</strong><span>Conf. {pct(player.confidence)} · DQ {pct(player.dataQuality)} · {player.playerImpact?.role || 'ruolo n/d'} · {player.playerImpact?.expectedMinutes ?? '—'} min attesi</span>{player.reason && <span>{player.reason}</span>}{player.status === 'ACTIVE' && <BetActions pick={pick} />}</div><b>{pct(player.probability)}</b><button aria-label={`Aggiungi ${player.playerName} segna`} disabled={player.status !== 'ACTIVE' || added} onClick={() => addPick(pick)}>{added ? '✓' : '+'}</button></div>;
+  })}</>;
 }
 
 function ValueMarkets({ rows, source, reason, loading }: { rows: any[] | null; source: string; reason: string; loading: boolean }) {
@@ -176,14 +173,34 @@ function ValueMarkets({ rows, source, reason, loading }: { rows: any[] | null; s
 }
 
 function MarketRow({ row, market, added, add, full = false }: { row: Row; market: Market; added: boolean; add: (row: Row, market: Market) => void; full?: boolean }) {
-  return <div className={'market ' + (market.status === 'NO_BET' ? 'off' : '')}><div><small>{market.market}</small><strong>{market.selection}</strong><span>Confidence {pct(market.confidence)} · Data Quality {pct(market.dataQuality)}{full && market.fairOdds ? ` · Fair ${market.fairOdds.toFixed(2)}` : ''}</span>{market.reason && <span>{market.reason}</span>}</div><b>{pct(market.probability)}</b><button aria-label={`Aggiungi ${market.selection}`} disabled={market.status !== 'ACTIVE' || added} onClick={() => add(row, market)}>{added ? '✓' : '+'}</button></div>;
+  const pick = toPick(row, market);
+  return <div className={'market ' + (market.status === 'NO_BET' ? 'off' : '')}><div><small>{market.market}</small><strong>{market.selection}</strong><span>Confidence {pct(market.confidence)} · Data Quality {pct(market.dataQuality)}{full && market.fairOdds ? ` · Fair ${market.fairOdds.toFixed(2)}` : ''}</span>{market.reason && <span>{market.reason}</span>}{full && market.status === 'ACTIVE' && <BetActions pick={pick} />}</div><b>{pct(market.probability)}</b><button aria-label={`Aggiungi ${market.selection}`} disabled={market.status !== 'ACTIVE' || added} onClick={() => add(row, market)}>{added ? '✓' : '+'}</button></div>;
+}
+
+function BetActions({ pick }: { pick: Pick }) {
+  const [stake, setStake] = useState('5');
+  const [odds, setOdds] = useState('');
+  const [bookmaker, setBookmaker] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function save(mode: 'NOT_PLAYED' | 'PLAYED' | 'SIMULATED') {
+    const stakeValue = Number(stake), oddsValue = Number(odds);
+    if (!Number.isFinite(stakeValue) || stakeValue <= 0) { setMessage('Inserisci uno stake valido.'); return; }
+    if (mode !== 'NOT_PLAYED' && (!Number.isFinite(oddsValue) || oddsValue < 1.01)) { setMessage('Inserisci una quota di esecuzione valida per reale o paper.'); return; }
+    setBusy(true); setMessage('');
+    try {
+      await post(`${API}/v2/history/bets`, { fixtureId: pick.fixtureId, competition: 'SA', market: pick.market, selection: pick.selection, stake: stakeValue, odds: mode === 'NOT_PLAYED' ? undefined : oddsValue, bookmaker: bookmaker.trim() || undefined, played: mode === 'PLAYED', simulated: mode === 'SIMULATED', eventAt: pick.eventAt });
+      setMessage(mode === 'PLAYED' ? 'Singola registrata come realmente giocata.' : mode === 'SIMULATED' ? 'Singola registrata in paper trading.' : 'Prediction salvata come non giocata.');
+    } catch (e: any) { setMessage(e.message); } finally { setBusy(false); }
+  }
+  return <details className="executionDetails singleExecution"><summary>Registra singola</summary><div className="form"><label>Stake €<input aria-label={`Stake ${pick.selection}`} type="number" min="0.1" step="0.1" value={stake} onChange={(e) => setStake(e.target.value)} /></label><label>Quota esecuzione<input aria-label={`Quota singola ${pick.selection}`} type="number" min="1.01" step="0.01" value={odds} onChange={(e) => setOdds(e.target.value)} placeholder="es. 1.85" /></label><label>Bookmaker<input value={bookmaker} onChange={(e) => setBookmaker(e.target.value)} placeholder="opzionale" /></label></div><div className="executionActions"><button disabled={busy} onClick={() => save('NOT_PLAYED')}>Salva</button><button disabled={busy} onClick={() => save('SIMULATED')}>Paper</button><button className="primary" disabled={busy} onClick={() => save('PLAYED')}>L’ho giocata</button></div>{message && <p className={message.includes('registrata') || message.includes('salvata') ? 'success' : 'notice'}>{message}</p>}</details>;
 }
 
 function SavedSystems() {
   const [items, setItems] = useState<any[]>([]);
   const [mode, setMode] = useState('');
   useEffect(() => { void json(`${API}/v2/history/systems${mode ? `?mode=${mode}` : ''}`).then(setItems).catch(() => setItems([])); }, [mode]);
-  return <div className="panel"><div className="sectionhead"><div><small>PORTAFOGLIO</small><h2>I miei sistemi</h2></div><select className="compact" value={mode} onChange={(e) => setMode(e.target.value)}><option value="">Tutti</option><option value="PLAYED">Reali</option><option value="SIMULATED">Paper</option><option value="NOT_PLAYED">Non giocati</option></select></div>{items.length ? items.map((system) => <HistoryRow key={system.id} title={`${system.mode} · ${system.selections.length} selezioni · ${system.combinations.length} combinazioni`} meta={`${executionLabel(system)} · €${Number(system.totalCost).toFixed(2)}${system.payout==null?'':` · payout €${Number(system.payout).toFixed(2)}`} · ${new Date(system.createdAt).toLocaleString('it-IT')}`} status={system.status} />) : <Empty title="Nessun sistema" text="I sistemi salvati appariranno qui." />}</div>;
+  return <div className="panel"><div className="sectionhead"><div><small>PORTAFOGLIO</small><h2>I miei sistemi</h2></div><select className="compact" value={mode} onChange={(e) => setMode(e.target.value)}><option value="">Tutti</option><option value="PLAYED">Reali</option><option value="SIMULATED">Paper</option><option value="NOT_PLAYED">Non giocati</option></select></div>{items.length ? items.map((system) => <HistoryRow key={system.id} title={`${system.mode} · ${system.selections.length} selezioni · ${system.combinations.length} combinazioni`} meta={`${executionLabel(system)} · €${Number(system.totalCost).toFixed(2)}${system.payout == null ? '' : ` · payout €${Number(system.payout).toFixed(2)}`} · ${new Date(system.createdAt).toLocaleString('it-IT')}`} status={system.status} />) : <Empty title="Nessun sistema" text="I sistemi salvati appariranno qui." />}</div>;
 }
 
 function HistoryRow({ title, meta, status }: { title: string; meta: string; status: string }) {
@@ -195,15 +212,15 @@ function featured(row: Row) {
   return [choose((market) => market.market === '1X2'), choose((market) => market.market === 'OVER_UNDER_2_5'), choose((market) => market.market === 'BTTS'), choose((market) => market.market.startsWith('HOME_GOALS_1_5') || market.market.startsWith('AWAY_GOALS_1_5'))].filter(Boolean) as Market[];
 }
 function marketCategory(market: Market) {
-  if (['1X2', 'DOUBLE_CHANCE', 'DRAW_NO_BET'].includes(market.market)) return 'Esito';
-  if (market.market.startsWith('OVER_UNDER') || market.market === 'BTTS' || market.market === 'MULTIGOAL') return 'Gol';
-  if (market.market.startsWith('HOME_GOALS') || market.market.startsWith('AWAY_GOALS')) return 'Team';
+  if (['1X2', 'DOUBLE_CHANCE', 'DRAW_NO_BET', 'WIN_MARGIN'].includes(market.market)) return 'Esito';
+  if (market.market.startsWith('OVER_UNDER') || ['BTTS', 'MULTIGOAL', 'GOALS_PARITY'].includes(market.market)) return 'Gol';
+  if (market.market.startsWith('HOME_GOALS') || market.market.startsWith('AWAY_GOALS') || ['CLEAN_SHEET', 'WIN_TO_NIL'].includes(market.market)) return 'Team';
   if (market.market === 'EXACT_SCORE') return 'Risultati';
   if (market.market === 'COMBO') return 'Combinazioni';
   return 'Altro';
 }
 function pickId(fixtureId: string, market: Market) { return `${fixtureId}|${market.market}|${market.selection}`; }
-function toPick(row: Row, market: Market): Pick { return { id: pickId(row.fixture.id, market), fixtureId: row.fixture.id, market: market.market, selection: market.selection, eventAt: row.fixture.utcDate, probability: market.probability, confidence: market.confidence, dataQuality: market.dataQuality, fairOdds: market.fairOdds }; }
+function toPick(row: Row, market: Market): Pick { return { id: pickId(row.fixture.id, market), fixtureId: row.fixture.id, market: market.market, selection: market.selection, eventAt: row.fixture.utcDate, probability: market.probability, confidence: market.confidence, dataQuality: market.dataQuality, fairOdds: market.fairOdds, period: market.period, metric: market.metric, operator: market.operator, threshold: market.threshold, outcome: market.outcome }; }
 function pct(value: any) { return value == null ? '—' : `${Math.round(Number(value) * 100)}%`; }
 function fmt(value: any) { return value == null ? '—' : Number(value).toFixed(2); }
 function executionLabel(value: any) { return value.played ? 'REALE' : value.simulated ? 'PAPER' : 'NON GIOCATO'; }
