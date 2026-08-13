@@ -6,6 +6,7 @@
     "build": "npm run build -w @fps/domain && npm run build -w @fps/player-engine && npm run build -w @fps/api && npm run build -w @fps/web",
     "typecheck": "npm run build -w @fps/domain && npm run build -w @fps/player-engine && npm run typecheck -w @fps/api && npm run typecheck -w @fps/web",
     "test": "npm run test -w @fps/domain && npm run test -w @fps/player-engine && npm run test -w @fps/api && npm run test -w @fps/web",
+    "e2e": "playwright test",
     "dev": "concurrently \"npm run dev -w @fps/api\" \"npm run dev -w @fps/web\"",
     "db:push": "npm run db:push -w @fps/api"
   },
@@ -14,6 +15,7 @@
     "sharp": "0.35.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "concurrently": "^9.0.0",
     "typescript": "^5.7.0"
   },
