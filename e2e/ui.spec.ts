@@ -71,8 +71,9 @@ test('active scorer can be added to system tray and recorded as a single',async(
   await page.goto('/');
   await page.getByRole('button',{name:'Analisi completa →'}).click();
   await page.getByRole('button',{name:'Marcatori'}).click();
-  await expect(page.getByText('Home Nine')).toBeVisible();
-  await page.getByRole('button',{name:'Aggiungi Home Nine segna'}).click();
+  const addScorer=page.getByRole('button',{name:'Aggiungi Home Nine segna'});
+  await expect(addScorer).toBeVisible();
+  await addScorer.click();
   await expect(page.getByText('1 selezioni')).toBeVisible();
   await page.getByText('Registra singola').click();
   await page.getByRole('spinbutton',{name:'Quota singola Home Nine segna'}).fill('2.50');
@@ -97,7 +98,7 @@ test('played system → settlement → history critical flow',async({page})=>{
   await page.getByRole('button',{name:'Verifica ora'}).click();
   await expect(page.getByText('1 elementi elaborati · 1 fixture interrogate.')).toBeVisible();
   await expect(page.locator('strong.status-win')).toHaveText('WIN');
-  await expect(page.getByText(/Prediction/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'Prediction'})).toBeVisible();
 });
 
 test('paper trading dashboard keeps virtual bankroll separate',async({page})=>{
