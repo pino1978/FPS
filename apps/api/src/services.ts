@@ -5,7 +5,7 @@ import { parseForm } from '@fps/domain';
 export type Fixture={id:string;utcDate:string;status:string;home:{id:string;name:string};away:{id:string;name:string}};
 export type Standing={teamId:string;played:number;points:number;goalsFor:number;goalsAgainst:number;formIndex?:number};
 export type MatchResult={id:string;status:string;home:number|null;away:number|null;lastUpdated?:string;scorers:string[]};
-export type Scorer={playerId:string;playerName:string;teamId:string;teamName:string;goals:number;assists:number;penalties:number};
+export type Scorer={playerId:string;playerName:string;teamId:string;teamName:string;goals:number;assists:number;penalties:number;position?:string};
 export type PlayerAvailability={playerName:string;teamName:string;type?:string;reason?:string};
 export type Enrichment={source:'API_FOOTBALL'|'UNAVAILABLE';providerFixtureId?:string;homeStarters:string[];awayStarters:string[];homeBench:string[];awayBench:string[];injuries:PlayerAvailability[];availabilityVerified:boolean};
 export type OfferedOdd={bookmaker:string;market:string;selection:string;odds:number;updatedAt?:string};
@@ -60,7 +60,7 @@ export class FootballProvider {
 
   async standings(competition='SA'):Promise<Standing[]>{const d=await this.footballData(`/competitions/${competition}/standings`,{},15*60_000);const total=(d.standings||[]).find((x:any)=>x.type==='TOTAL')?.table||[];return total.map((r:any)=>({teamId:String(r.team.id),played:r.playedGames,points:r.points,goalsFor:r.goalsFor,goalsAgainst:r.goalsAgainst,formIndex:parseForm(r.form)}));}
 
-  async scorers(competition='SA',limit=50):Promise<Scorer[]>{const d=await this.footballData(`/competitions/${competition}/scorers?limit=${limit}`,{},30*60_000);return (d.scorers||[]).map((s:any)=>({playerId:String(s.player.id),playerName:s.player.name,teamId:String(s.team.id),teamName:s.team.name,goals:Number(s.goals||0),assists:Number(s.assists||0),penalties:Number(s.penalties||0)}));}
+  async scorers(competition='SA',limit=50):Promise<Scorer[]>{const d=await this.footballData(`/competitions/${competition}/scorers?limit=${limit}`,{},30*60_000);return (d.scorers||[]).map((s:any)=>({playerId:String(s.player.id),playerName:s.player.name,teamId:String(s.team.id),teamName:s.team.name,goals:Number(s.goals||0),assists:Number(s.assists||0),penalties:Number(s.penalties||0),position:s.player?.position||undefined}));}
 
   async matchDetails(matchId:string){return this.footballData(`/matches/${encodeURIComponent(matchId)}`,{'X-Unfold-Lineups':'true','X-Unfold-Goals':'true'},60_000);}
 
