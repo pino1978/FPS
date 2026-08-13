@@ -11,6 +11,7 @@ export type Enrichment={source:'API_FOOTBALL'|'UNAVAILABLE';providerFixtureId?:s
 export type OfferedOdd={bookmaker:string;market:string;selection:string;odds:number;updatedAt?:string};
 
 type CacheEntry={expiresAt:number;value:any};
+type CircuitState={failures:number;openedUntil:number};
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleDestroy {
@@ -22,17 +23,36 @@ export class FootballProvider {
   private fd=process.env.FOOTBALL_DATA_BASE_URL||'https://api.football-data.org/v4';
   private af=process.env.API_FOOTBALL_BASE_URL||'https://v3.football.api-sports.io';
   private cache=new Map<string,CacheEntry>();
+  private circuits=new Map<string,CircuitState>();
 
   private async cached(key:string,ttlMs:number,loader:()=>Promise<any>){const now=Date.now(),hit=this.cache.get(key);if(hit&&hit.expiresAt>now)return hit.value;const value=await loader();this.cache.set(key,{expiresAt:now+ttlMs,value});return value;}
 
+  private async requestJson(provider:string,url:string,headers:Record<string,string>){
+    const now=Date.now();const state=this.circuits.get(provider)||{failures:0,openedUntil:0};
+    if(state.openedUntil>now)throw new Error(`${provider} circuit open`);
+    let lastError:unknown;
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        const r=await fetch(url,{headers});
+        if(r.ok){this.circuits.set(provider,{failures:0,openedUntil:0});return r.json() as Promise<any>;}
+        const retryable=r.status===429||r.status>=500;
+        if(!retryable)throw new Error(`${provider} ${r.status}`);
+        lastError=new Error(`${provider} ${r.status}`);
+      }catch(error){lastError=error;}
+      if(attempt<2)await sleep(250*Math.pow(2,attempt));
+    }
+    const failures=state.failures+1;this.circuits.set(provider,{failures,openedUntil:failures>=5?Date.now()+60_000:0});
+    throw lastError instanceof Error?lastError:new Error(`${provider} request failed`);
+  }
+
   async footballData(path:string,headers:Record<string,string>={},ttlMs=5*60_000){
     const token=process.env.FOOTBALL_DATA_TOKEN;if(!token)throw new Error('FOOTBALL_DATA_TOKEN missing');
-    return this.cached(`fd:${path}:${JSON.stringify(headers)}`,ttlMs,async()=>{const r=await fetch(this.fd+path,{headers:{'X-Auth-Token':token,...headers}});if(!r.ok)throw new Error('football-data '+r.status);return r.json() as Promise<any>;});
+    return this.cached(`fd:${path}:${JSON.stringify(headers)}`,ttlMs,()=>this.requestJson('football-data',this.fd+path,{'X-Auth-Token':token,...headers}));
   }
 
   async apiFootball(path:string,ttlMs=5*60_000){
     const key=process.env.API_FOOTBALL_KEY;if(!key)throw new Error('API_FOOTBALL_KEY missing');
-    return this.cached(`af:${path}`,ttlMs,async()=>{const r=await fetch(this.af+path,{headers:{'x-apisports-key':key}});if(!r.ok)throw new Error('api-football '+r.status);return r.json() as Promise<any>;});
+    return this.cached(`af:${path}`,ttlMs,()=>this.requestJson('api-football',this.af+path,{'x-apisports-key':key}));
   }
 
   async fixtures(competition='SA',date?:string):Promise<Fixture[]>{const q=new URLSearchParams();if(date){q.set('dateFrom',date);q.set('dateTo',date)}const d=await this.footballData(`/competitions/${competition}/matches?${q}`,{},5*60_000);return (d.matches||[]).map((m:any)=>({id:String(m.id),utcDate:m.utcDate,status:m.status,home:{id:String(m.homeTeam.id),name:m.homeTeam.name},away:{id:String(m.awayTeam.id),name:m.awayTeam.name}}));}
@@ -61,8 +81,7 @@ export class FootballProvider {
       const data=await this.apiFootball(`/odds?fixture=${encodeURIComponent(providerFixtureId)}`,3*60*60_000);
       const rows:OfferedOdd[]=[];
       for(const fixture of data.response||[])for(const bookmaker of fixture.bookmakers||[])for(const bet of bookmaker.bets||[])for(const value of bet.values||[]){
-        const mapped=mapOdd(bet.name,value.value);
-        const odds=Number(value.odd);
+        const mapped=mapOdd(bet.name,value.value);const odds=Number(value.odd);
         if(mapped&&Number.isFinite(odds)&&odds>1)rows.push({bookmaker:bookmaker.name||String(bookmaker.id),market:mapped.market,selection:mapped.selection,odds,updatedAt:fixture.update});
       }
       return rows;
@@ -76,6 +95,7 @@ export class FootballProvider {
   }
 }
 
+function sleep(ms:number){return new Promise(resolve=>setTimeout(resolve,ms));}
 function mapOdd(name:string|undefined,value:string|undefined){const n=(name||'').toLowerCase(),v=(value||'').trim();if(n.includes('match winner')){if(/^home$/i.test(v))return {market:'1X2',selection:'1'};if(/^draw$/i.test(v))return {market:'1X2',selection:'X'};if(/^away$/i.test(v))return {market:'1X2',selection:'2'};}if(n.includes('goals over/under')&&!n.includes('half')){const m=v.match(/(Over|Under)\s*(\d+(?:\.\d+)?)/i);if(m)return {market:`OVER_UNDER_${m[2].replace('.','_')}`,selection:`${m[1].toUpperCase()} ${m[2]}`};}if(n.includes('both teams')||n.includes('both team')){if(/^yes$/i.test(v))return {market:'BTTS',selection:'GOAL'};if(/^no$/i.test(v))return {market:'BTTS',selection:'NO GOAL'};}return null;}
 function names(list:any[]|undefined){return (list||[]).map((x:any)=>x.player?.name).filter(Boolean);}
 function normalize(value:string|undefined){return (value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|ac|ssc|ss|calcio|club)\b/g,'').replace(/[^a-z0-9]/g,'');}
