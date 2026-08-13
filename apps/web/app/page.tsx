@@ -109,7 +109,7 @@ function Predictions({ rows, loading, error, bag, add, open, retry }: {
     {!rows.length && !error ? <Empty title="Nessuna partita disponibile" text="Il provider non restituisce fixture per il periodo corrente." /> : <div className="grid">{rows.map((row) => <article className="card" key={row.fixture.id}>
       <div className="matchMeta"><small>{new Date(row.fixture.utcDate).toLocaleString('it-IT')}</small><span className="status">{row.fixture.status || 'SCHEDULED'}</span></div>
       <h3>{row.fixture.home.name} <em>—</em> {row.fixture.away.name}</h3>
-      {featured(row).map((market) => <MarketRow key={`${market.market}-${market.selection}`} row={row} market={market} added={bag.some((pick) => pick.id === pickId(row.fixture.id, market))} add={add} />)}
+      {featured(row).length ? featured(row).map((market) => <MarketRow key={`${market.market}-${market.selection}`} row={row} market={market} added={bag.some((pick) => pick.id === pickId(row.fixture.id, market))} add={add} />) : <div className="notice"><b>NO BET</b><span>{row.markets.find((market) => market.status === 'NO_BET')?.reason || 'Dati insufficienti per una prediction affidabile.'}</span></div>}
       <button className="detailBtn" onClick={() => open(row)}>Analisi completa →</button>
     </article>)}</div>}
   </>;
@@ -150,7 +150,7 @@ function MatchDetail({ row, bag, add, addPick }: { row: Row; bag: Pick[]; add: (
     <MatchIntelligence fixtureId={row.fixture.id} />
     <div className="tabs marketTabs">{categories.map((name) => <button className={category === name ? 'on' : ''} key={name} onClick={() => select(name)}>{name}</button>)}</div>
     <section className="panel"><div className="sectionhead"><div><small>{category.toUpperCase()}</small><h2>{category === 'Marcatori' ? 'Probabilità giocatore' : category === 'Value' ? 'Value & quote' : 'Mercati e probabilità'}</h2></div></div>
-      {category === 'Marcatori' ? <PlayerMarkets row={row} players={players} loading={loadingPlayers} error={playerError} bag={bag} addPick={addPick} /> : category === 'Value' ? <ValueMarkets rows={value} source={valueSource} reason={valueReason} loading={loadingValue} /> : shown.length ? shown.map((market) => <MarketRow key={`${market.market}-${market.selection}`} row={row} market={market} added={bag.some((pick) => pick.id === pickId(row.fixture.id, market))} add={add} full />) : <Empty title="Mercato non disponibile" text="Nessun mercato di questa categoria è modellabile con i dati correnti." />}
+      {category === 'Marcatori' ? <PlayerMarkets row={row} players={players} loading={loadingPlayers} error={playerError} bag={bag} addPick={addPick} /> : category === 'Value' ? <ValueMarkets rows={value} source={valueSource} reason={valueReason} loading={loadingValue} /> : shown.length ? shown.map((market) => <MarketRow key={`${market.market}-${market.selection}`} row={row} market={market} added={bag.some((pick) => pick.id === pickId(row.fixture.id, market))} add={add} full />) : <Empty title="Mercato non disponibile" text={row.markets.find((market) => market.status === 'NO_BET')?.reason || 'Nessun mercato di questa categoria è modellabile con i dati correnti.'} />}
     </section>
   </>;
 }
@@ -162,7 +162,7 @@ function PlayerMarkets({ row, players, loading, error, bag, addPick }: { row: Ro
   return <>{players.map((player) => {
     const pick: Pick = { id: `${row.fixture.id}|ANYTIME_SCORER|${player.playerId}`, fixtureId: row.fixture.id, market: 'ANYTIME_SCORER', selection: player.selection || `${player.playerName} segna`, eventAt: row.fixture.utcDate, probability: player.probability, confidence: player.confidence, dataQuality: player.dataQuality, fairOdds: player.fairOdds, period: 'FT', teamSide: player.teamSide, playerId: player.playerId };
     const added = bag.some((x) => x.id === pick.id);
-    return <div className={'market ' + (player.status === 'NO_BET' ? 'off' : '')} key={player.playerId}><div><small>ANYTIME SCORER</small><strong>{player.playerName}</strong><span>Conf. {pct(player.confidence)} · DQ {pct(player.dataQuality)} · {player.playerImpact?.role || 'ruolo n/d'} · {player.playerImpact?.expectedMinutes ?? '—'} min attesi</span>{player.reason && <span>{player.reason}</span>}{player.status === 'ACTIVE' && <BetActions pick={pick} />}</div><b>{pct(player.probability)}</b><button aria-label={`Aggiungi ${player.playerName} segna`} disabled={player.status !== 'ACTIVE' || added} onClick={() => addPick(pick)}>{added ? '✓' : '+'}</button></div>;
+    return <div className={'market ' + (player.status === 'NO_BET' ? 'off' : '')} key={player.playerId}><div><small>ANYTIME SCORER</small><strong>{player.playerName}</strong><span>Conf. {pct(player.confidence)} · DQ {pct(player.dataQuality)} · {player.playerImpact?.role || 'ruolo n/d'} · {player.playerImpact?.expectedMinutes ?? '—'} min attesi</span>{player.reason && <span>{player.reason}</span>}{player.status === 'ACTIVE' && <BetActions pick={pick} />}</div><b>{player.status === 'ACTIVE' ? pct(player.probability) : 'NO BET'}</b><button aria-label={`Aggiungi ${player.playerName} segna`} disabled={player.status !== 'ACTIVE' || added} onClick={() => addPick(pick)}>{added ? '✓' : '+'}</button></div>;
   })}</>;
 }
 
@@ -174,7 +174,7 @@ function ValueMarkets({ rows, source, reason, loading }: { rows: any[] | null; s
 
 function MarketRow({ row, market, added, add, full = false }: { row: Row; market: Market; added: boolean; add: (row: Row, market: Market) => void; full?: boolean }) {
   const pick = toPick(row, market);
-  return <div className={'market ' + (market.status === 'NO_BET' ? 'off' : '')}><div><small>{market.market}</small><strong>{market.selection}</strong><span>Confidence {pct(market.confidence)} · Data Quality {pct(market.dataQuality)}{full && market.fairOdds ? ` · Fair ${market.fairOdds.toFixed(2)}` : ''}</span>{market.reason && <span>{market.reason}</span>}{full && market.status === 'ACTIVE' && <BetActions pick={pick} />}</div><b>{pct(market.probability)}</b><button aria-label={`Aggiungi ${market.selection}`} disabled={market.status !== 'ACTIVE' || added} onClick={() => add(row, market)}>{added ? '✓' : '+'}</button></div>;
+  return <div className={'market ' + (market.status === 'NO_BET' ? 'off' : '')}><div><small>{market.market}</small><strong>{market.selection}</strong><span>Confidence {pct(market.confidence)} · Data Quality {pct(market.dataQuality)}{full && market.fairOdds ? ` · Fair ${market.fairOdds.toFixed(2)}` : ''}</span>{market.reason && <span>{market.reason}</span>}{full && market.status === 'ACTIVE' && <BetActions pick={pick} />}</div><b>{market.status === 'ACTIVE' ? pct(market.probability) : 'NO BET'}</b><button aria-label={`Aggiungi ${market.selection}`} disabled={market.status !== 'ACTIVE' || added} onClick={() => add(row, market)}>{added ? '✓' : '+'}</button></div>;
 }
 
 function BetActions({ pick }: { pick: Pick }) {
