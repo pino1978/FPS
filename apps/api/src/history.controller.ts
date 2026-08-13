@@ -28,6 +28,7 @@ export class HistoryController {
     const eventAt = validDate(body.eventAt, 'eventAt');
     const played = body.played === true, simulated = body.simulated === true;
     if (played && simulated) throw new Error('A bet cannot be both real and simulated');
+    if (played && odds == null) throw new Error('actual odds are required for a real bet');
     const playedAt = body.playedAt ? validDate(body.playedAt, 'playedAt') : played ? new Date() : undefined;
     const origin = await this.findOrigin(body.fixtureId, body.market, body.selection, eventAt);
     const bet = await this.db.bet.create({
@@ -69,7 +70,9 @@ export class HistoryController {
   }) {
     assertText(id, 'id');
     if (!['NOT_PLAYED', 'PLAYED', 'SIMULATED'].includes(body?.mode)) throw new Error('Invalid execution mode');
+    const current = await this.db.bet.findUniqueOrThrow({ where: { id } });
     const played = body.mode === 'PLAYED', simulated = body.mode === 'SIMULATED';
+    if (played && body.odds == null && current.odds == null) throw new Error('actual odds are required for a real bet');
     const updated = await this.db.bet.update({
       where: { id },
       data: {
@@ -176,7 +179,9 @@ export class HistoryController {
   }) {
     assertText(id, 'id');
     if (!['NOT_PLAYED', 'PLAYED', 'SIMULATED'].includes(body?.mode)) throw new Error('Invalid execution mode');
+    const current = await this.db.bettingSystem.findUniqueOrThrow({ where: { id }, include: { selections: true } });
     const played = body.mode === 'PLAYED', simulated = body.mode === 'SIMULATED';
+    if (played && current.selections.some((selection) => selection.odds == null)) throw new Error('actual odds are required for every selection in a real system');
     const updated = await this.db.bettingSystem.update({
       where: { id },
       data: {
@@ -186,7 +191,7 @@ export class HistoryController {
         playedAt: played ? (body.playedAt ? validDate(body.playedAt, 'playedAt') : new Date()) : null,
         notes: clean(body.notes),
       },
-      include: { selections: true, combinations: { include: { items: true } } },
+      include: { selections: true, combinations: { include: { items: { include: { selection: true } } } } },
     });
     await this.db.auditEvent.create({ data: { entityType: 'BettingSystem', entityId: id, action: `EXECUTION_${body.mode}` } });
     return presentSystem(updated);
@@ -220,7 +225,7 @@ export class HistoryController {
           } },
         } : {}),
       },
-      include: { selections: true, combinations: { include: { items: true } } },
+      include: { selections: true, combinations: { include: { items: { include: { selection: true } } } } },
       orderBy: { createdAt: 'desc' },
       take: 250,
     });
@@ -282,7 +287,22 @@ function presentBet<T extends { status: string; stake: number; odds: number | nu
   return { ...bet, payout: payout == null ? null : Number(payout.toFixed(2)), originalPrediction: originalPrediction(bet) };
 }
 function presentSystem(system: any) {
-  return { ...system, selections: (system.selections ?? []).map((x: any) => ({ ...x, originalPrediction: originalPrediction(x) })) };
+  const combinations = system.combinations ?? [];
+  let payout = 0;
+  let payoutKnown = combinations.length > 0 && combinations.every((combo: any) => {
+    if (combo.status === 'LOSS') return true;
+    if (combo.status === 'VOID') { payout += Number(combo.stake || 0); return true; }
+    if (combo.status !== 'WIN') return false;
+    const odds = (combo.items ?? []).map((item: any) => item.selection?.odds);
+    if (!odds.length || odds.some((odd: any) => odd == null)) return false;
+    payout += Number(combo.stake || 0) * odds.reduce((product: number, odd: number) => product * Number(odd), 1);
+    return true;
+  });
+  return {
+    ...system,
+    payout: payoutKnown ? Number(payout.toFixed(2)) : null,
+    selections: (system.selections ?? []).map((x: any) => ({ ...x, originalPrediction: originalPrediction(x) })),
+  };
 }
 function clean(value?: string) { const v = value?.trim(); return v ? v.slice(0, 500) : undefined; }
 function assertText(value: unknown, field: string) { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); }
