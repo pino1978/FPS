@@ -48,7 +48,7 @@ export class HistoryController {
     await this.db.auditEvent.create({
       data: { entityType: 'Bet', entityId: bet.id, action: played ? 'REAL_BET_RECORDED' : simulated ? 'PAPER_BET_RECORDED' : 'BET_SAVED' },
     });
-    return bet;
+    return withPayout(bet);
   }
 
   @Post('bets/:id/execution')
@@ -76,7 +76,7 @@ export class HistoryController {
       },
     });
     await this.db.auditEvent.create({ data: { entityType: 'Bet', entityId: id, action: `EXECUTION_${body.mode}` } });
-    return updated;
+    return withPayout(updated);
   }
 
   @Get('bets')
@@ -90,7 +90,7 @@ export class HistoryController {
     @Query('to') to?: string,
   ) {
     const dateFilter = dateRange(from, to);
-    return this.db.bet.findMany({
+    const bets = await this.db.bet.findMany({
       where: {
         ...(mode === 'PLAYED' ? { played: true, simulated: false } : mode === 'SIMULATED' ? { simulated: true, played: false } : mode === 'NOT_PLAYED' ? { played: false, simulated: false } : {}),
         ...(status ? { status } : {}),
@@ -102,6 +102,7 @@ export class HistoryController {
       orderBy: { createdAt: 'desc' },
       take: 500,
     });
+    return bets.map(withPayout);
   }
 
   @Post('systems/:id/execution')
@@ -152,6 +153,10 @@ export class HistoryController {
   }
 }
 
+function withPayout<T extends { status: string; stake: number; odds: number | null }>(bet: T) {
+  const payout = bet.status === 'WIN' && bet.odds ? bet.stake * bet.odds : bet.status === 'LOSS' ? 0 : bet.status === 'VOID' ? bet.stake : null;
+  return { ...bet, payout: payout == null ? null : Number(payout.toFixed(2)) };
+}
 function clean(value?: string) { const v = value?.trim(); return v ? v.slice(0, 500) : undefined; }
 function assertText(value: unknown, field: string) { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); }
 function positive(value: unknown, field: string) { const n = Number(value); if (!Number.isFinite(n) || n <= 0) throw new Error(`${field} must be > 0`); return n; }
