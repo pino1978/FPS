@@ -28,7 +28,7 @@ export class IngestionService {
   }
 
   async run(competitions = DEFAULT_COMPETITIONS) {
-    const report: Array<Record<string, unknown>> = [];
+    const report: Array<{competition:string;status:string;fixtures?:number;standings?:number;message?:string}> = [];
     for (const competition of competitions) {
       try {
         const [fixtures, standings] = await Promise.all([
@@ -91,7 +91,12 @@ export class IngestionService {
       }
     }
     await this.db.auditEvent.create({
-      data: { entityType: 'IngestionRun', entityId: new Date().toISOString(), action: 'COMPLETED', payload: report },
+      data: {
+        entityType: 'IngestionRun',
+        entityId: new Date().toISOString(),
+        action: 'COMPLETED',
+        payload: JSON.parse(JSON.stringify(report)),
+      },
     });
     return report;
   }
