@@ -16,7 +16,6 @@ export class AnalyticsService {
         fixtureId: { in: fixtureIds },
         modelVersion: input.modelVersion,
         eventAt: { gte: input.from, lte: input.to },
-        inputSnapshot: { not: undefined },
       },
       include: { snapshots: true },
       orderBy: { asOf: 'asc' },
@@ -30,7 +29,7 @@ export class AnalyticsService {
       : null;
     const hitRate = settled.length ? settled.filter((s) => s.outcome === 'WIN').length / settled.length : null;
 
-    const saved = await this.db.backtestRun.create({
+    return this.db.backtestRun.create({
       data: {
         competition: input.competition,
         modelVersion: input.modelVersion,
@@ -46,7 +45,6 @@ export class AnalyticsService {
         },
       },
     });
-    return saved;
   }
 
   async listBacktests() {
