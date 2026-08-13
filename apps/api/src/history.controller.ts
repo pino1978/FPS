@@ -128,6 +128,7 @@ export class HistoryController {
   ) {
     const fixtureIds = competition || team ? await this.fixtureIds({ competition, team }) : undefined;
     if ((competition || team) && !fixtureIds?.length) return [];
+    const asOf = dateRange(from, to);
     const snapshots = await this.db.predictionSnapshot.findMany({
       where: {
         ...(market ? { market } : {}),
@@ -135,7 +136,7 @@ export class HistoryController {
         run: {
           ...(fixtureIds ? { fixtureId: { in: fixtureIds } } : {}),
           ...(modelVersion ? { modelVersion } : {}),
-          ...(dateRange(from, to) ? { asOf: dateRange(from, to) } : {}),
+          ...(asOf ? { asOf } : {}),
         },
       },
       include: { run: true, settlement: true },
@@ -228,7 +229,7 @@ export class HistoryController {
 
   private async findOrigin(fixtureId: string, market: string, selection: string, eventAt: Date) {
     return this.db.predictionSnapshot.findFirst({
-      where: { fixtureId: undefined, market, selection, run: { fixtureId, asOf: { lt: eventAt } } },
+      where: { market, selection, run: { fixtureId, asOf: { lt: eventAt } } },
       include: { run: true },
       orderBy: { createdAt: 'desc' },
     });
