@@ -8,6 +8,7 @@ import { settleMvpMarket } from './settlement-rules';
 export class SettlementService {
   private readonly log = new Logger(SettlementService.name);
   private running = false;
+  private resultCache = new Map<string, any>();
 
   constructor(private football: FootballProvider, private db: PrismaService) {}
 
@@ -19,22 +20,27 @@ export class SettlementService {
   }
 
   private async verifiedResult(fixtureId: string) {
+    if (this.resultCache.has(fixtureId)) return this.resultCache.get(fixtureId);
     const result = await this.football.result(fixtureId);
-    if (result.status !== 'FINISHED' || result.home == null || result.away == null) return null;
-    return { ...result, version: `fd:${fixtureId}:${result.lastUpdated || 'v1'}` };
+    const verified = result.status === 'FINISHED' && result.home != null && result.away != null
+      ? { ...result, version: `fd:${fixtureId}:${result.lastUpdated || 'v1'}` }
+      : null;
+    this.resultCache.set(fixtureId, verified);
+    return verified;
   }
 
   async run() {
+    this.resultCache = new Map();
     const results: any[] = [];
     await this.settleBets(results);
     await this.settleSystems(results);
     await this.settlePredictions(results);
-    return { processed: results.length, results };
+    return { processed: results.length, fixturesFetched: this.resultCache.size, results };
   }
 
   private async settleBets(out: any[]) {
     const pending = await this.db.bet.findMany({
-      where: { OR: [{ played: true }, { simulated: true }], status: 'PENDING', verifiedAt: null },
+      where: { OR: [{ played: true }, { simulated: true }], verificationStatus: 'PENDING', verifiedAt: null },
     });
     for (const bet of pending.filter((b) => settlementEligible(b.eventAt, false))) {
       const result = await this.verifiedResult(bet.fixtureId);
@@ -42,8 +48,8 @@ export class SettlementService {
       const decision = settleMvpMarket(bet.market, bet.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
       if (decision === 'UNSUPPORTED') { out.push({ type: 'BET', id: bet.id, status: 'UNSUPPORTED' }); continue; }
       const updated = await this.db.bet.updateMany({
-        where: { id: bet.id, status: 'PENDING', verifiedAt: null },
-        data: { status: decision, verifiedAt: new Date(), resultVersion: result.version },
+        where: { id: bet.id, verificationStatus: 'PENDING', verifiedAt: null },
+        data: { status: decision, verificationStatus: 'VERIFIED', verifiedAt: new Date(), resultVersion: result.version },
       });
       if (updated.count === 1) { await this.audit('Bet', bet.id, decision, result); out.push({ type: 'BET', id: bet.id, status: decision }); }
     }
@@ -51,7 +57,7 @@ export class SettlementService {
 
   private async settleSystems(out: any[]) {
     const selections = await this.db.systemSelection.findMany({
-      where: { status: 'PENDING', verifiedAt: null, system: { OR: [{ played: true }, { simulated: true }] } },
+      where: { verificationStatus: 'PENDING', verifiedAt: null, system: { OR: [{ played: true }, { simulated: true }] } },
     });
     for (const pick of selections.filter((s) => settlementEligible(s.eventAt, false))) {
       const result = await this.verifiedResult(pick.fixtureId);
@@ -59,8 +65,8 @@ export class SettlementService {
       const decision = settleMvpMarket(pick.market, pick.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
       if (decision === 'UNSUPPORTED') { out.push({ type: 'SYSTEM_SELECTION', id: pick.id, status: 'UNSUPPORTED' }); continue; }
       const updated = await this.db.systemSelection.updateMany({
-        where: { id: pick.id, status: 'PENDING', verifiedAt: null },
-        data: { status: decision, verifiedAt: new Date(), resultVersion: result.version },
+        where: { id: pick.id, verificationStatus: 'PENDING', verifiedAt: null },
+        data: { status: decision, verificationStatus: 'VERIFIED', verifiedAt: new Date(), resultVersion: result.version },
       });
       if (updated.count === 1) { await this.audit('SystemSelection', pick.id, decision, result); out.push({ type: 'SYSTEM_SELECTION', id: pick.id, status: decision }); }
     }
@@ -71,23 +77,28 @@ export class SettlementService {
     });
     for (const combination of combinations) {
       const states = combination.items.map((item) => item.selection.status);
-      if (!states.length || states.some((state) => state === 'PENDING' || state === 'UNSUPPORTED')) continue;
+      const verified = combination.items.every((item) => item.selection.verificationStatus === 'VERIFIED');
+      if (!states.length || !verified) continue;
       const status = states.some((state) => state === 'LOSS') ? 'LOSS' : states.every((state) => state === 'VOID') ? 'VOID' : 'WIN';
       const updated = await this.db.systemCombination.updateMany({ where: { id: combination.id, status: 'PENDING' }, data: { status } });
       if (updated.count === 1) out.push({ type: 'SYSTEM_COMBINATION', id: combination.id, status });
     }
 
     const systems = await this.db.bettingSystem.findMany({
-      where: { OR: [{ played: true }, { simulated: true }], status: 'PENDING' },
-      include: { combinations: true },
+      where: { OR: [{ played: true }, { simulated: true }], verificationStatus: 'PENDING' },
+      include: { combinations: true, selections: true },
     });
     for (const system of systems) {
       if (!system.combinations.length || system.combinations.some((combination) => combination.status === 'PENDING')) continue;
+      if (system.selections.some((selection) => selection.verificationStatus !== 'VERIFIED')) continue;
       const wins = system.combinations.filter((combination) => combination.status === 'WIN').length;
       const losses = system.combinations.filter((combination) => combination.status === 'LOSS').length;
       const voids = system.combinations.filter((combination) => combination.status === 'VOID').length;
       const status = wins > 0 && losses > 0 ? 'PARTIAL' : wins > 0 ? 'WIN' : losses > 0 ? 'LOSS' : 'VOID';
-      const updated = await this.db.bettingSystem.updateMany({ where: { id: system.id, status: 'PENDING' }, data: { status } });
+      const updated = await this.db.bettingSystem.updateMany({
+        where: { id: system.id, verificationStatus: 'PENDING' },
+        data: { status, verificationStatus: 'VERIFIED' },
+      });
       if (updated.count === 1) {
         await this.db.auditEvent.create({ data: { entityType: 'BettingSystem', entityId: system.id, action: 'SETTLED', payload: { status, wins, losses, voids } } });
         out.push({ type: 'SYSTEM', id: system.id, status, winningCombinations: wins });
@@ -97,21 +108,30 @@ export class SettlementService {
 
   private async settlePredictions(out: any[]) {
     const runs = await this.db.predictionRun.findMany({
-      where: { eventAt: { lte: new Date(Date.now() - 150 * 60000) }, snapshots: { some: { outcome: null } } },
-      include: { snapshots: true },
+      where: { eventAt: { lte: new Date(Date.now() - 150 * 60000) }, snapshots: { some: { settlement: null } } },
+      include: { snapshots: { include: { settlement: true } } },
     });
     for (const run of runs) {
       const result = await this.verifiedResult(run.fixtureId);
       if (!result) continue;
-      for (const prediction of run.snapshots.filter((x) => x.outcome === null)) {
-        if (prediction.status === 'NO_BET') {
-          await this.db.predictionSnapshot.updateMany({ where: { id: prediction.id, outcome: null }, data: { outcome: 'NO_BET', settledAt: new Date(), resultVersion: result.version } });
-          continue;
+      for (const prediction of run.snapshots.filter((x) => x.settlement === null)) {
+        const outcome = prediction.status === 'NO_BET'
+          ? 'NO_BET'
+          : settleMvpMarket(prediction.market, prediction.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
+        if (outcome === 'UNSUPPORTED') continue;
+        try {
+          await this.db.predictionSettlement.create({
+            data: {
+              snapshotId: prediction.id,
+              outcome,
+              resultVersion: result.version,
+              evidence: { score: { home: result.home, away: result.away }, scorers: result.scorers },
+            },
+          });
+          out.push({ type: 'PREDICTION', id: prediction.id, status: outcome });
+        } catch (error: any) {
+          if (error?.code !== 'P2002') throw error;
         }
-        const decision = settleMvpMarket(prediction.market, prediction.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
-        if (decision === 'UNSUPPORTED') continue;
-        const updated = await this.db.predictionSnapshot.updateMany({ where: { id: prediction.id, outcome: null }, data: { outcome: decision, settledAt: new Date(), resultVersion: result.version } });
-        if (updated.count === 1) out.push({ type: 'PREDICTION', id: prediction.id, status: decision });
       }
     }
   }
