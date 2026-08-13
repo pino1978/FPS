@@ -68,7 +68,7 @@ test('played system → settlement → history critical flow',async({page})=>{
   await expect(page.getByText(/ASSISTED · 1 selezioni/)).toBeVisible();
   await page.getByRole('button',{name:'Verifica ora'}).click();
   await expect(page.getByText('1 elementi elaborati · 1 fixture interrogate.')).toBeVisible();
-  await expect(page.getByText('WIN')).toBeVisible();
+  await expect(page.locator('strong.status-win')).toHaveText('WIN');
   await expect(page.getByText(/Prediction/)).toBeVisible();
 });
 
