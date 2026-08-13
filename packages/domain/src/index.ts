@@ -1,9 +1,18 @@
+export type VenueMetrics = {
+  played: number;
+  points: number;
+  goalsFor: number;
+  goalsAgainst: number;
+};
+
 export type TeamMetrics = {
   played: number;
   points: number;
   goalsFor: number;
   goalsAgainst: number;
   formIndex?: number;
+  home?: VenueMetrics;
+  away?: VenueMetrics;
 };
 
 export type ValueAssessment = {
@@ -45,7 +54,7 @@ export type Correlation = {
 };
 export type Score = { home: number; away: number };
 
-export const MODEL_VERSION = 'poisson-form-v2';
+export const MODEL_VERSION = 'poisson-strength-availability-v3';
 export const CORRELATION_RULESET_VERSION = 'correlation-v1';
 
 const clamp = (n: number, min = 0, max = 1) => Math.max(min, Math.min(max, n));
@@ -73,6 +82,7 @@ export function parseForm(form?: string | null): number | undefined {
   return tokens.reduce((sum, token) => sum + (token === 'W' ? 1 : token === 'D' ? 0.5 : 0), 0) / tokens.length;
 }
 
+/** @deprecated Use predictFixture from market-engine for the versioned MVP model. */
 export function predictMarkets(home: TeamMetrics, away: TeamMetrics): MarketPrediction[] {
   const minGames = Math.min(home.played, away.played);
   const formCoverage = home.formIndex == null || away.formIndex == null ? 0.9 : 1;
