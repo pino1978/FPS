@@ -1,10 +1,11 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { IngestionService } from './ingestion.service';
+import { PrismaService } from './services';
 
 @Controller('ops')
 export class OperationsController {
-  constructor(private ingestion: IngestionService, private analytics: AnalyticsService) {}
+  constructor(private ingestion: IngestionService, private analytics: AnalyticsService, private db: PrismaService) {}
 
   @Post('ingestion/run')
   async ingest(@Body() body?: { competitions?: string[] }) {
@@ -33,8 +34,15 @@ export class OperationsController {
   @Get('paper-trading')
   async paperRuns() { return this.analytics.listPaperTrading(); }
 
+  @Get('performance')
+  async performance() { return this.analytics.performance(); }
+
   @Get('fixtures/persisted')
-  async persistedFixtures(@Query('competition') _competition?: string) {
-    return { note: 'Use the public fixtures endpoint for live data; persisted data is maintained by the ingestion job.' };
+  async persistedFixtures(@Query('competition') competition?: string) {
+    return this.db.fixture.findMany({
+      where: competition ? { competition } : {},
+      orderBy: { utcDate: 'asc' },
+      take: 250,
+    });
   }
 }
