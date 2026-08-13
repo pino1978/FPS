@@ -64,7 +64,14 @@ function validSelections(value: unknown): Selection[] {
     const probability = item.probability == null ? undefined : unitInterval(item.probability, `selections[${index}].probability`);
     const confidence = item.confidence == null ? undefined : unitInterval(item.confidence, `selections[${index}].confidence`);
     const dataQuality = item.dataQuality == null ? undefined : unitInterval(item.dataQuality, `selections[${index}].dataQuality`);
-    return { id, fixtureId, market, selection, odds, probability, confidence, dataQuality };
+    const period = item.period == null ? undefined : enumValue(item.period,['FT','HT'],`selections[${index}].period`) as 'FT'|'HT';
+    const teamSide = item.teamSide == null ? undefined : enumValue(item.teamSide,['HOME','AWAY'],`selections[${index}].teamSide`) as 'HOME'|'AWAY';
+    const metric = optionalText(item.metric,`selections[${index}].metric`);
+    const operator = optionalText(item.operator,`selections[${index}].operator`);
+    const outcome = optionalText(item.outcome,`selections[${index}].outcome`);
+    const playerId = optionalText(item.playerId,`selections[${index}].playerId`);
+    const threshold = item.threshold == null ? undefined : finiteNumber(item.threshold,`selections[${index}].threshold`);
+    return { id, fixtureId, market, selection, odds, probability, confidence, dataQuality, period, teamSide, metric, operator, outcome, playerId, threshold };
   });
 }
 
@@ -83,7 +90,10 @@ function validProfile(value: unknown): 'PRUDENT' | 'BALANCED' | 'AGGRESSIVE' {
   return profile as 'PRUDENT' | 'BALANCED' | 'AGGRESSIVE';
 }
 function text(value: unknown, field: string) { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); return value.trim().slice(0, 200); }
+function optionalText(value:unknown,field:string){if(value==null)return undefined;if(typeof value!=='string'||!value.trim())throw new Error(`${field} is invalid`);return value.trim().slice(0,200);}
+function enumValue(value:unknown,allowed:string[],field:string){const v=String(value);if(!allowed.includes(v))throw new Error(`${field} is invalid`);return v;}
 function positive(value: unknown, field: string) { const n = Number(value); if (!Number.isFinite(n) || n <= 0) throw new Error(`${field} must be > 0`); return n; }
 function positiveInteger(value: unknown, field: string) { const n = positive(value, field); if (!Number.isInteger(n)) throw new Error(`${field} must be an integer`); return n; }
 function minNumber(value: unknown, min: number, field: string) { const n = Number(value); if (!Number.isFinite(n) || n < min) throw new Error(`${field} must be >= ${min}`); return n; }
+function finiteNumber(value:unknown,field:string){const n=Number(value);if(!Number.isFinite(n))throw new Error(`${field} must be finite`);return n;}
 function unitInterval(value: unknown, field: string) { const n = Number(value); if (!Number.isFinite(n) || n < 0 || n > 1) throw new Error(`${field} must be between 0 and 1`); return n; }
