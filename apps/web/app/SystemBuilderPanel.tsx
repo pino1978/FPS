@@ -28,15 +28,15 @@ export default function SystemBuilderPanel({bag,setBag,available}:{bag:SystemPic
  async function save(execution:'NOT_PLAYED'|'PLAYED'|'SIMULATED'){
   if(!result||result.status!=='OK')return;
   const oddsById=new Map<string,number>();
-  if(execution==='PLAYED'){
-   for(const pick of resultSelections){const odds=Number(actualOdds[pick.id]);if(!Number.isFinite(odds)||odds<=1){setSaved(`Inserisci la quota effettivamente presa per ${pick.selection}.`);return}oddsById.set(pick.id,odds)}
+  if(execution!=='NOT_PLAYED'){
+   for(const pick of resultSelections){const odds=Number(actualOdds[pick.id]);if(!Number.isFinite(odds)||odds<=1){setSaved(`Inserisci la quota di esecuzione per ${pick.selection} prima di registrare una giocata reale o paper.`);return}oddsById.set(pick.id,odds)}
   }
   setBusy(true);setSaved('');
   try{
    const comboStake=Number(result.stake??stake);
    const savedSystem=await post(`${API}/systems/save`,{
     mode,profile,budget,totalCost:Number(result.cost||0),played:false,
-    selections:resultSelections.map(p=>({clientKey:p.id,fixtureId:p.fixtureId,market:p.market,selection:p.selection,eventAt:p.eventAt,odds:execution==='PLAYED'?oddsById.get(p.id):undefined})),
+    selections:resultSelections.map(p=>({clientKey:p.id,fixtureId:p.fixtureId,market:p.market,selection:p.selection,eventAt:p.eventAt,odds:execution!=='NOT_PLAYED'?oddsById.get(p.id):undefined})),
     combinations:(result.combinations||[]).map((combo:SystemPick[])=>({selectionKeys:combo.map(p=>p.id),stake:comboStake})),
    });
    if(execution!=='NOT_PLAYED')await post(`${API}/v2/history/systems/${savedSystem.id}/execution`,{mode:execution,bookmaker:bookmaker.trim()||undefined});
@@ -50,7 +50,7 @@ export default function SystemBuilderPanel({bag,setBag,available}:{bag:SystemPic
   {mode!=='AUTO'&&bag.length>0&&<div className="fixedList"><small>SELEZIONI · “FISSA” = PRESENTE IN OGNI COMBINAZIONE</small>{bag.map(p=><div className="fixedRow" key={p.id}><span><b>{p.selection}</b><small>{p.market}</small></span><button className={p.fixed?'fixed on':'fixed'} onClick={()=>toggleFixed(p.id)}>{p.fixed?'Fissa ✓':'Fissa'}</button></div>)}</div>}
   <button className="primary" disabled={busy||!source.length} onClick={build}>{busy?'Elaborazione…':'Genera sistema'}</button>
   {result&&<SystemResult result={result} budget={budget}/>} 
-  {result?.status==='OK'&&<details className="executionDetails"><summary>Dati della giocata reale</summary><p>Questi dati vengono usati solo se scegli “L’ho giocato”. Le Fair Odds del modello restano separate.</p><div className="form"><label>Bookmaker (opzionale)<input value={bookmaker} onChange={e=>setBookmaker(e.target.value)} placeholder="Bookmaker"/></label>{resultSelections.map(p=><label key={p.id}>Quota effettiva · {p.selection}<input aria-label={`Quota effettiva ${p.selection}`} type="number" min="1.01" step="0.01" value={actualOdds[p.id]||''} onChange={e=>setActualOdds(v=>({...v,[p.id]:e.target.value}))} placeholder="es. 1.85"/></label>)}</div></details>}
+  {result?.status==='OK'&&<details className="executionDetails"><summary>Quote di esecuzione · reale o paper</summary><p>Inserisci le quote effettivamente disponibili al momento dell’esecuzione. Servono per P/L, ROI e yield; le Fair Odds del modello restano separate.</p><div className="form"><label>Bookmaker (opzionale)<input value={bookmaker} onChange={e=>setBookmaker(e.target.value)} placeholder="Bookmaker"/></label>{resultSelections.map(p=><label key={p.id}>Quota esecuzione · {p.selection}<input aria-label={`Quota effettiva ${p.selection}`} type="number" min="1.01" step="0.01" value={actualOdds[p.id]||''} onChange={e=>setActualOdds(v=>({...v,[p.id]:e.target.value}))} placeholder="es. 1.85"/></label>)}</div></details>}
   {result?.status==='OK'&&<div className="executionActions"><button onClick={()=>save('NOT_PLAYED')}>Salva</button><button onClick={()=>save('SIMULATED')}>Paper trading</button><button className="primary" onClick={()=>save('PLAYED')}>L’ho giocato</button></div>}
   {saved&&<p className={saved.startsWith('Sistema registrato')||saved.startsWith('Sistema salvato')?'success':'notice'}>{saved}</p>}
  </div>;
