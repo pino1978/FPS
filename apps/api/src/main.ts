@@ -1,13 +1,44 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
 
 type Bucket={windowStart:number;count:number};
 
+export function classifyInternalError(exception:unknown){
+  const error=exception as {code?:unknown;message?:unknown}|null;
+  const code=typeof error?.code==='string'?error.code:'';
+  const message=typeof error?.message==='string'?error.message.toLowerCase():'';
+  const databaseNotReady=code==='P2021'||code==='P2022'||message.includes('no such table')||(message.includes('table')&&message.includes('does not exist'))||(message.includes('relation')&&message.includes('does not exist'));
+  return databaseNotReady?{code:'DATABASE_NOT_READY',message:'Servizio dati in aggiornamento. Riprova tra poco.'}:{code:'INTERNAL_ERROR',message:'Errore temporaneo del servizio. Riprova.'};
+}
+
+@Catch()
+class SafeHttpExceptionFilter implements ExceptionFilter{
+  catch(exception:unknown,host:ArgumentsHost){
+    const http=host.switchToHttp();
+    const response=http.getResponse<any>();
+    const request=http.getRequest<any>();
+    const requestId=request?.requestId?String(request.requestId):undefined;
+    if(exception instanceof HttpException){
+      const statusCode=exception.getStatus();
+      const source=exception.getResponse();
+      const rawMessage=(source as any)?.message;
+      const message=typeof source==='string'?source:typeof rawMessage==='string'?rawMessage:Array.isArray(rawMessage)?rawMessage.join('; '):exception.message;
+      return response.status(statusCode).send({statusCode,error:HttpStatus[statusCode]||'HTTP_ERROR',message,...(requestId?{requestId}:{})});
+    }
+    const classification=classifyInternalError(exception);
+    const error=exception as {name?:unknown;code?:unknown;message?:unknown}|null;
+    console.error(JSON.stringify({event:'http_error',requestId,method:request?.method,path:String(request?.url||'').split('?')[0],classification:classification.code,errorName:typeof error?.name==='string'?error.name:'Error',errorCode:typeof error?.code==='string'?error.code:undefined,message:typeof error?.message==='string'?error.message:String(exception)}));
+    return response.status(500).send({statusCode:500,error:classification.code,message:classification.message,...(requestId?{requestId}:{})});
+  }
+}
+
 async function bootstrap(){
   const app=await NestFactory.create<NestFastifyApplication>(AppModule,new FastifyAdapter(),{bufferLogs:true});
+  app.useGlobalFilters(new SafeHttpExceptionFilter());
   const configured=(process.env.CORS_ORIGINS||'http://localhost:3000').split(',').map(x=>x.trim()).filter(Boolean);
   app.enableCors({
     origin:(origin,callback)=>{
