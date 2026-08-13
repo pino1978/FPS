@@ -15,11 +15,19 @@ const predictionPayload={
   }]
 };
 
-async function mockApi(page:any){
+const intelligence={
+  statistics:{home:{played:20,points:42,goalsFor:36,goalsAgainst:18,formIndex:.8},away:{played:20,points:38,goalsFor:32,goalsAgainst:21,formIndex:.7}},
+  lineup:{home:{starters:['Home Nine'],bench:['Home Reserve']},away:{starters:['Away Nine'],bench:['Away Reserve']},source:'MOCK'},
+  injuries:[{playerName:'Home Doubt',teamName:'Juventus',reason:'Muscle'}],availabilityVerified:true,
+  explanation:['Juventus: 42 punti in 20 gare.','Napoli: 38 punti in 20 gare.','Expected goals modello: 1.55 - 1.15.','Indisponibilità verificate.']
+};
+
+async function mockApi(page:any,{incompatible=false}:{incompatible?:boolean}={}){
   await page.route('http://localhost:4000/**',async(route:any)=>{
     const url=route.request().url();
     if(url.includes('/v2/predictions'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(predictionPayload)});
-    if(url.includes('/v2/systems/assist'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({status:'OK',profile:'BALANCED',stake:1,cost:1,selections:[],combinations:[],coverage:{explanation:'Copertura e2e',guarantee:'Nessuna garanzia di profitto'}})});
+    if(url.includes('/v2/matches/fixture-1/intelligence'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(intelligence)});
+    if(url.includes('/v2/systems/assist'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(incompatible?{status:'INCOMPATIBLE',reason:'Selezioni logicamente incompatibili',invalid:[['1','X']],combinations:[],cost:0}:{status:'OK',profile:'BALANCED',stake:1,cost:1,selections:[],combinations:[],coverage:{explanation:'Copertura e2e',guarantee:'Nessuna garanzia di profitto'}})});
     return route.fulfill({status:200,contentType:'application/json',body:'{}'});
   });
 }
@@ -35,6 +43,29 @@ test('fixture → prediction → add to system critical flow',async({page})=>{
   await page.getByRole('button',{name:'Sistemi'}).first().click();
   await expect(page.getByRole('heading',{name:'System Builder'})).toBeVisible();
   await expect(page.getByText('Pronostici 1')).toBeVisible();
+});
+
+test('match detail exposes form lineup injuries and quantitative motivation progressively',async({page})=>{
+  await mockApi(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'Analisi completa →'}).click();
+  await expect(page.getByRole('heading',{name:'Juventus — Napoli'})).toBeVisible();
+  await expect(page.getByText('FORMA CASA')).toBeVisible();
+  await page.getByText('Lineup & indisponibili').click();
+  await expect(page.getByText('Home Nine')).toBeVisible();
+  await expect(page.getByText('Home Doubt')).toBeVisible();
+  await page.getByText('Motivazione quantitativa').click();
+  await expect(page.getByText('Expected goals modello: 1.55 - 1.15.')).toBeVisible();
+});
+
+test('incompatible system response is visibly blocked',async({page})=>{
+  await mockApi(page,{incompatible:true});
+  await page.goto('/');
+  await page.getByRole('button',{name:'Aggiungi 1'}).click();
+  await page.getByRole('button',{name:'Sistemi'}).first().click();
+  await page.getByRole('button',{name:'Genera sistema'}).click();
+  await expect(page.getByText('INCOMPATIBLE')).toBeVisible();
+  await expect(page.getByText('Selezioni logicamente incompatibili')).toBeVisible();
 });
 
 test('principal controls are keyboard reachable and named',async({page})=>{
