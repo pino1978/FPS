@@ -59,16 +59,19 @@ export function expectedGoals(home: TeamMetrics, away: TeamMetrics, config = DEF
 }
 
 export function scoreProbabilityMatrix(lambdaHome: number, lambdaAway: number, maxGoals = DEFAULT_MODEL_CONFIG.maxGoals) {
-  const cells: ScoreCell[] = [];
-  let sum = 0;
+  const raw: ScoreCell[] = [];
+  let rawSum = 0;
   for (let home = 0; home <= maxGoals; home++) {
     for (let away = 0; away <= maxGoals; away++) {
       const probability = poisson(home, lambdaHome) * poisson(away, lambdaAway);
-      cells.push({ home, away, probability });
-      sum += probability;
+      raw.push({ home, away, probability });
+      rawSum += probability;
     }
   }
-  return { cells, residualProbability: Math.max(0, 1 - sum) };
+  const residualProbability = Math.max(0, 1 - rawSum);
+  const normalizer = rawSum > 0 ? rawSum : 1;
+  const cells = raw.map((cell) => ({ ...cell, probability: cell.probability / normalizer }));
+  return { cells, residualProbability };
 }
 
 const sumWhere = (matrix: ScoreCell[], predicate: (cell: ScoreCell) => boolean) => matrix.reduce((sum, cell) => sum + (predicate(cell) ? cell.probability : 0), 0);
