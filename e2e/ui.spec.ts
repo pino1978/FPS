@@ -37,6 +37,20 @@ test('fixture → prediction → add to system critical flow',async({page})=>{
   await expect(page.getByText('Pronostici 1')).toBeVisible();
 });
 
+test('principal controls are keyboard reachable and named',async({page})=>{
+  await mockApi(page);
+  await page.goto('/');
+  const nav=page.getByRole('navigation',{name:'Navigazione principale'});
+  await expect(nav).toBeVisible();
+  await expect(page.getByRole('button',{name:'Aggiungi 1'})).toHaveAttribute('aria-label','Aggiungi 1');
+  await page.keyboard.press('Tab');
+  const firstFocused=await page.evaluate(()=>document.activeElement?.tagName);
+  expect(firstFocused).toBe('BUTTON');
+  await page.keyboard.press('Tab');
+  const secondName=await page.evaluate(()=>document.activeElement?.textContent?.trim());
+  expect(secondName).toBeTruthy();
+});
+
 for(const viewport of [
   {name:'320px',width:320,height:720},
   {name:'mobile',width:390,height:844},
