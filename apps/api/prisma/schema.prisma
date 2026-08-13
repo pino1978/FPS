@@ -91,6 +91,23 @@ model PredictionSettlement {
   @@index([outcome, settledAt])
 }
 
+model OddsSnapshot {
+  id                String   @id @default(cuid())
+  fingerprint       String   @unique
+  fixtureId         String
+  providerFixtureId String?
+  bookmaker         String
+  market            String
+  selection         String
+  odds              Float
+  capturedAt        DateTime @default(now())
+  providerUpdatedAt DateTime?
+  source            String
+
+  @@index([fixtureId, market, capturedAt])
+  @@index([bookmaker, market, capturedAt])
+}
+
 model Bet {
   id                 String    @id @default(cuid())
   fixtureId          String
