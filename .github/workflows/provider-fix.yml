@@ -1,0 +1,72 @@
+name: Provider 400 Fix
+
+on:
+  push:
+    branches:
+      - fix/football-data-400-diagnostics
+    paths:
+      - '.github/workflows/provider-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/football-data-400-diagnostics
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Apply provider fix and regression tests
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('apps/api/src/services.ts')
+          s = p.read_text()
+          old = """      if(response.ok){this.circuits.set(provider,{failures:0,openedUntil:0});return response.json() as Promise<any>;}\n      const error=new Error(`${provider} ${response.status}`);\n      const retryable=response.status===429||response.status>=500;\n"""
+          new = """      if(response.ok){this.circuits.set(provider,{failures:0,openedUntil:0});return response.json() as Promise<any>;}\n      const detail=await providerErrorDetail(response);\n      const error=new Error(`${provider} ${response.status}${detail?`: ${detail}`:''}`);\n      const retryable=response.status===429||response.status>=500;\n"""
+          if old not in s:
+              raise SystemExit('requestJson target not found')
+          s = s.replace(old, new, 1)
+
+          old = "async fixtures(competition='SA',date?:string):Promise<Fixture[]>{const q=new URLSearchParams();if(date){q.set('dateFrom',date);q.set('dateTo',date)}const d=await this.footballData(`/competitions/${competition}/matches?${q}`,{},5*60_000);"
+          new = "async fixtures(competition='SA',date?:string):Promise<Fixture[]>{const q=new URLSearchParams();if(date){q.set('dateFrom',date);q.set('dateTo',date)}const query=q.toString();const d=await this.footballData(`/competitions/${encodeURIComponent(competition)}/matches${query?`?${query}`:''}`,{},5*60_000);"
+          if old not in s:
+              raise SystemExit('fixtures target not found')
+          s = s.replace(old, new, 1)
+
+          helper = """\nasync function providerErrorDetail(response:Response){\n  try{\n    const text=(await response.text()).trim();\n    if(!text)return '';\n    try{const json=JSON.parse(text);const detail=String(json?.error||json?.message||'').trim();return sanitizeProviderDetail(detail||text);}\n    catch{return sanitizeProviderDetail(text);}\n  }catch{return '';}\n}\nfunction sanitizeProviderDetail(value:string){return value.replace(/[\\r\\n\\t]+/g,' ').replace(/\\s+/g,' ').slice(0,240);}\n"""
+          anchor = "\nfunction unavailableEnrichment():Enrichment"
+          if 'async function providerErrorDetail' not in s:
+              s = s.replace(anchor, helper + anchor, 1)
+          p.write_text(s)
+
+          t = Path('apps/api/src/services.test.ts')
+          x = t.read_text()
+          old = """  it('does not retry a non-retryable 400 response',async()=>{\n    const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}',{status:400}));\n    const provider=new FootballProvider();\n    await expect(provider.footballData('/bad-request',{},0)).rejects.toThrow('football-data 400');\n    expect(fetchMock).toHaveBeenCalledTimes(1);\n  });\n"""
+          new = """  it('does not retry a non-retryable 400 response and exposes sanitized provider detail',async()=>{\n    const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify({error:\"Parameter 'dateFrom' is invalid.\"}),{status:400,headers:{'content-type':'application/json'}}));\n    const provider=new FootballProvider();\n    await expect(provider.footballData('/bad-request',{},0)).rejects.toThrow(\"football-data 400: Parameter 'dateFrom' is invalid.\");\n    expect(fetchMock).toHaveBeenCalledTimes(1);\n  });\n\n  it('does not append an empty query string when loading fixtures without a date',async()=>{\n    const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify({matches:[]}),{status:200,headers:{'content-type':'application/json'}}));\n    const provider=new FootballProvider();\n    await provider.fixtures('SA');\n    expect(fetchMock).toHaveBeenCalledTimes(1);\n    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.football-data.org/v4/competitions/SA/matches');\n  });\n"""
+          if old not in x:
+              raise SystemExit('test target not found')
+          t.write_text(x.replace(old, new, 1))
+
+      - run: npm ci
+      - run: npm run test -w @fps/api
+      - run: npm run typecheck
+      - run: npm run build
+
+      - name: Commit validated fix
+        run: |
+          git config user.name 'fps-ci'
+          git config user.email 'fps-ci@users.noreply.github.com'
+          git add apps/api/src/services.ts apps/api/src/services.test.ts
+          git diff --cached --check
+          git commit -m 'fix(provider): diagnose football-data 400 requests'
+          git push origin HEAD:fix/football-data-400-diagnostics
