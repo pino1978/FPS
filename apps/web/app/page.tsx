@@ -1,9 +1,10 @@
 'use client';
 
-import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import HistoryDashboard from './HistoryDashboard';
 import MatchIntelligence from './MatchIntelligence';
 import StatsDashboard from './StatsDashboard';
+import SystemBuilderPanel from './SystemBuilderPanel';
 
 type Market = {
   market: string;
@@ -44,11 +45,6 @@ const json = async (url: string, init?: RequestInit) => {
   if (!response.ok) throw new Error(body?.message || `${response.status} ${response.statusText}`);
   return body;
 };
-const post = (url: string, body?: unknown) => json(url, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: body === undefined ? undefined : JSON.stringify(body),
-});
 
 export default function Home() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -92,7 +88,7 @@ export default function Home() {
       {detail ? <MatchDetail row={detail} bag={bag} add={add} /> : <>
         {tab === 'Pronostici' && <Predictions rows={rows} loading={loading} error={error} bag={bag} add={add} open={setDetail} retry={load} />}
         {tab === 'Partite' && <Matches rows={rows} open={setDetail} />}
-        {tab === 'Sistemi' && <SystemBuilder bag={bag} setBag={setBag} available={available} />}
+        {tab === 'Sistemi' && <SystemBuilderPanel bag={bag} setBag={setBag} available={available} />}
         {tab === 'I miei sistemi' && <SavedSystems />}
         {tab === 'Storico' && <HistoryDashboard />}
         {tab === 'Statistiche' && <StatsDashboard />}
@@ -183,66 +179,11 @@ function MarketRow({ row, market, added, add, full = false }: { row: Row; market
   return <div className={'market ' + (market.status === 'NO_BET' ? 'off' : '')}><div><small>{market.market}</small><strong>{market.selection}</strong><span>Confidence {pct(market.confidence)} · Data Quality {pct(market.dataQuality)}{full && market.fairOdds ? ` · Fair ${market.fairOdds.toFixed(2)}` : ''}</span>{market.reason && <span>{market.reason}</span>}</div><b>{pct(market.probability)}</b><button aria-label={`Aggiungi ${market.selection}`} disabled={market.status !== 'ACTIVE' || added} onClick={() => add(row, market)}>{added ? '✓' : '+'}</button></div>;
 }
 
-function SystemBuilder({ bag, setBag, available }: { bag: Pick[]; setBag: Dispatch<SetStateAction<Pick[]>>; available: Pick[] }) {
-  const [mode, setMode] = useState<'AUTO' | 'ASSISTED' | 'MANUAL'>('ASSISTED');
-  const [profile, setProfile] = useState<'PRUDENT' | 'BALANCED' | 'AGGRESSIVE'>('BALANCED');
-  const [budget, setBudget] = useState(20);
-  const [minCorrect, setMinCorrect] = useState(3);
-  const [k, setK] = useState(3);
-  const [stake, setStake] = useState(1);
-  const [result, setResult] = useState<any>();
-  const [saved, setSaved] = useState('');
-  const [busy, setBusy] = useState(false);
-  const source = mode === 'AUTO' ? available : bag;
-  const fixedIds = bag.filter((pick) => pick.fixed).map((pick) => pick.id);
-  const toggleFixed = (id: string) => setBag((current) => current.map((pick) => pick.id === id ? { ...pick, fixed: !pick.fixed } : pick));
-
-  async function build() {
-    setBusy(true); setSaved('');
-    try {
-      const payload = mode === 'AUTO' ? { selections: source, budget, profile } : mode === 'ASSISTED' ? { selections: source, minCorrect, budget, profile, fixedIds } : { selections: source, k, stake, budget, fixedIds };
-      const endpoint = mode === 'AUTO' ? '/v2/systems/optimize' : mode === 'ASSISTED' ? '/v2/systems/assist' : '/v2/systems/build';
-      setResult(await post(API + endpoint, payload));
-    } catch (e: any) { setResult({ status: 'ERROR', reason: e.message }); } finally { setBusy(false); }
-  }
-
-  async function save(execution: 'NOT_PLAYED' | 'PLAYED' | 'SIMULATED') {
-    if (!result || result.status !== 'OK') return;
-    setBusy(true);
-    try {
-      const comboStake = Number(result.stake ?? stake);
-      const selections: Pick[] = result.selections || source;
-      const savedSystem = await post(`${API}/systems/save`, {
-        mode, profile, budget, totalCost: Number(result.cost || 0), played: false,
-        selections: selections.map((pick) => ({ clientKey: pick.id, fixtureId: pick.fixtureId, market: pick.market, selection: pick.selection, eventAt: pick.eventAt })),
-        combinations: (result.combinations || []).map((combo: Pick[]) => ({ selectionKeys: combo.map((pick) => pick.id), stake: comboStake })),
-      });
-      if (execution !== 'NOT_PLAYED') await post(`${API}/v2/history/systems/${savedSystem.id}/execution`, { mode: execution });
-      setSaved(execution === 'PLAYED' ? 'Sistema registrato come realmente giocato.' : execution === 'SIMULATED' ? 'Sistema registrato in paper trading.' : 'Sistema salvato come non giocato.');
-    } catch (e: any) { setSaved(e.message); } finally { setBusy(false); }
-  }
-
-  return <div className="panel"><small>CREAZIONE GUIDATA</small><h2>System Builder</h2><p>Automatico seleziona opportunità valide; Assistito sviluppa i pronostici scelti; Manuale espone la combinatoria. Le incompatibilità sono sempre bloccate.</p>
-    <div className="tabs"><button className={mode === 'AUTO' ? 'on' : ''} onClick={() => setMode('AUTO')}>Automatico</button><button className={mode === 'ASSISTED' ? 'on' : ''} onClick={() => setMode('ASSISTED')}>Assistito</button><button className={mode === 'MANUAL' ? 'on' : ''} onClick={() => setMode('MANUAL')}>Manuale</button></div>
-    <div className="form"><label>Pronostici <b>{source.length}</b></label><label>Budget €<input type="number" min="1" value={budget} onChange={(e) => setBudget(Number(e.target.value))} /></label><label>Profilo<select value={profile} onChange={(e) => setProfile(e.target.value as any)}><option value="PRUDENT">Prudente</option><option value="BALANCED">Bilanciato</option><option value="AGGRESSIVE">Aggressivo</option></select></label>{mode === 'ASSISTED' && <label>Minimo corretti desiderato<input type="number" min="1" max={source.length || 1} value={minCorrect} onChange={(e) => setMinCorrect(Number(e.target.value))} /></label>}{mode === 'MANUAL' && <><label>Dimensione combinazioni<input type="number" min="1" max={source.length || 1} value={k} onChange={(e) => setK(Number(e.target.value))} /></label><label>Stake/combo €<input type="number" min="0.1" step="0.1" value={stake} onChange={(e) => setStake(Number(e.target.value))} /></label></>}</div>
-    {mode !== 'AUTO' && bag.length > 0 && <div className="fixedList"><small>SELEZIONI · “FISSA” = PRESENTE IN OGNI COMBINAZIONE</small>{bag.map((pick) => <div className="fixedRow" key={pick.id}><span><b>{pick.selection}</b><small>{pick.market}</small></span><button className={pick.fixed ? 'fixed on' : 'fixed'} onClick={() => toggleFixed(pick.id)}>{pick.fixed ? 'Fissa ✓' : 'Fissa'}</button></div>)}</div>}
-    <button className="primary" disabled={busy || !source.length} onClick={build}>{busy ? 'Elaborazione…' : 'Genera sistema'}</button>
-    {result && <SystemResult result={result} budget={budget} />}
-    {result?.status === 'OK' && <div className="executionActions"><button onClick={() => save('NOT_PLAYED')}>Salva</button><button onClick={() => save('SIMULATED')}>Paper trading</button><button className="primary" onClick={() => save('PLAYED')}>L’ho giocato</button></div>}
-    {saved && <p className="success">{saved}</p>}
-  </div>;
-}
-
-function SystemResult({ result, budget }: { result: any; budget: number }) {
-  if (result.status !== 'OK') return <div className="notice"><b>{result.status === 'NO_BET' ? 'NO_BET' : result.status}</b><span>{result.reason || 'Il sistema non può essere generato con i vincoli correnti.'}</span></div>;
-  return <div className="systemSummary"><div><small>COMBINAZIONI</small><b>{result.combinations?.length ?? 0}</b></div><div><small>COSTO</small><b>€{Number(result.cost || 0).toFixed(2)}</b></div><div><small>BUDGET</small><b>€{Number(budget).toFixed(2)}</b></div><div><small>RISCHIO / CORR.</small><b>{result.profile || 'Custom'} {result.maxCorrelation != null ? `· ${Math.round(result.maxCorrelation * 100)}%` : ''}</b></div>{result.coverage && <p><strong>Copertura:</strong> {result.coverage.explanation}<br /><span>{result.coverage.guarantee}</span></p>}</div>;
-}
-
 function SavedSystems() {
   const [items, setItems] = useState<any[]>([]);
   const [mode, setMode] = useState('');
   useEffect(() => { void json(`${API}/v2/history/systems${mode ? `?mode=${mode}` : ''}`).then(setItems).catch(() => setItems([])); }, [mode]);
-  return <div className="panel"><div className="sectionhead"><div><small>PORTAFOGLIO</small><h2>I miei sistemi</h2></div><select className="compact" value={mode} onChange={(e) => setMode(e.target.value)}><option value="">Tutti</option><option value="PLAYED">Reali</option><option value="SIMULATED">Paper</option><option value="NOT_PLAYED">Non giocati</option></select></div>{items.length ? items.map((system) => <HistoryRow key={system.id} title={`${system.mode} · ${system.selections.length} selezioni · ${system.combinations.length} combinazioni`} meta={`${executionLabel(system)} · €${Number(system.totalCost).toFixed(2)} · ${new Date(system.createdAt).toLocaleString('it-IT')}`} status={system.status} />) : <Empty title="Nessun sistema" text="I sistemi salvati appariranno qui." />}</div>;
+  return <div className="panel"><div className="sectionhead"><div><small>PORTAFOGLIO</small><h2>I miei sistemi</h2></div><select className="compact" value={mode} onChange={(e) => setMode(e.target.value)}><option value="">Tutti</option><option value="PLAYED">Reali</option><option value="SIMULATED">Paper</option><option value="NOT_PLAYED">Non giocati</option></select></div>{items.length ? items.map((system) => <HistoryRow key={system.id} title={`${system.mode} · ${system.selections.length} selezioni · ${system.combinations.length} combinazioni`} meta={`${executionLabel(system)} · €${Number(system.totalCost).toFixed(2)}${system.payout==null?'':` · payout €${Number(system.payout).toFixed(2)}`} · ${new Date(system.createdAt).toLocaleString('it-IT')}`} status={system.status} />) : <Empty title="Nessun sistema" text="I sistemi salvati appariranno qui." />}</div>;
 }
 
 function HistoryRow({ title, meta, status }: { title: string; meta: string; status: string }) {
