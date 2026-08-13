@@ -17,7 +17,7 @@ export default function Home(){
  const available=useMemo(()=>rows.flatMap(r=>featured(r).filter(m=>m.status==='ACTIVE').map(m=>toPick(r,m))),[rows]);
  const add=(r:Row,m:Market)=>{const p=toPick(r,m);setBag(v=>v.some(x=>x.id===p.id)?v:[...v,p])};
  return <div className="shell">
-  <aside className="side" aria-label="Navigazione principale"><div className="brand">F<span>FORESIGHT</span></div>{(['Pronostici','Partite','Sistemi','I miei sistemi','Storico','Statistiche'] as Tab[]).map(x=><button key={x} className={tab===x?'on':''} onClick={()=>{setTab(x);setDetail(null)}}>{x}</button>)}</aside>
+  <nav className="side" aria-label="Navigazione principale"><div className="brand">F<span>FORESIGHT</span></div>{(['Pronostici','Partite','Sistemi','I miei sistemi','Storico','Statistiche'] as Tab[]).map(x=><button key={x} className={tab===x?'on':''} onClick={()=>{setTab(x);setDetail(null)}}>{x}</button>)}</nav>
   <main><header><div><small>FOOTBALL INTELLIGENCE · DATI REALI</small><h1>{detail?'Dettaglio partita':tab}</h1></div><div className="headActions"><span className="live">● LIVE DATA</span>{detail&&<button className="ghost" onClick={()=>setDetail(null)}>← Indietro</button>}</div></header>
    {detail?<MatchDetail row={detail} bag={bag} add={add}/>:<>{tab==='Pronostici'&&<Predictions rows={rows} loading={loading} error={error} bag={bag} add={add} open={setDetail} retry={load}/>} {tab==='Partite'&&<Matches rows={rows} open={setDetail}/>} {tab==='Sistemi'&&<SystemBuilder bag={bag} setBag={setBag} available={available}/>} {tab==='I miei sistemi'&&<SavedSystems/>}{tab==='Storico'&&<History/>}{tab==='Statistiche'&&<Stats/>}</>}
   </main>
