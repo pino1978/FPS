@@ -1,12 +1,12 @@
 {
   "name": "@fps/domain",
   "version": "0.1.0",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/public.js",
+  "types": "dist/public.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/public.d.ts",
+      "default": "./dist/public.js"
     },
     "./market-engine": {
       "types": "./dist/market-engine.d.ts",
