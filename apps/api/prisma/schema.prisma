@@ -173,6 +173,7 @@ model SystemSelection {
   originDataQuality  Float?
   originFairOdds     Float?
   originModelVersion String?
+  originCapturedAt   DateTime?
   status             String            @default("PENDING")
   verificationStatus String            @default("PENDING")
   verifiedAt         DateTime?
