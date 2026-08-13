@@ -34,6 +34,7 @@ async function mockApi(page:any,{incompatible=false}:{incompatible?:boolean}={})
     if(url.endsWith('/settlement/run')&&method==='POST'){systemSettled=true;return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({processed:1,fixturesFetched:1})});}
     if(url.includes('/v2/history/systems')&&method==='GET')return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(systemPlayed?[{id:'system-e2e',mode:'ASSISTED',profile:'BALANCED',totalCost:1,payout:systemSettled?1.9:null,played:true,simulated:false,status:systemSettled?'WIN':'PENDING',createdAt:'2026-08-13T01:00:00.000Z',selections:[{id:'sel-1',market:'1X2',selection:'1',odds:1.9,originalPrediction:{probability:.46,confidence:.72,dataQuality:.85,fairOdds:2.17,modelVersion:'e2e-v1',capturedAt:'2026-08-13T00:00:00.000Z'}}],combinations:[{id:'combo-1',status:systemSettled?'WIN':'PENDING'}]}]:[])});
     if(url.includes('/v2/history/bets')||url.includes('/v2/history/predictions'))return route.fulfill({status:200,contentType:'application/json',body:'[]'});
+    if(url.includes('/v2/paper/report'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({bankrollInitial:1000,bankrollFinal:1000,profit:0,stakeTotal:0,returnsTotal:0,roi:null,yield:null,maxDrawdown:0,winRate:null,betsCount:0,systemsCount:0,incompleteEconomicRecords:0,marketPerformance:[]})});
     if(url.includes('/ops/performance'))return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({modelPerformance:{sample:2,brierScore:.2,logLoss:.5,hitRate:.5,calibration:[],byMarket:[],byCompetition:[],byConfidence:[],byModelVersion:[],byPeriod:[]},bettingPerformance:{sample:0,byMarket:[],byCompetition:[],byBookmaker:[],systemsVsSingles:{systems:{systems:0},singles:{sample:0}}}})});
     return route.fulfill({status:200,contentType:'application/json',body:'{}'});
   });
@@ -59,7 +60,7 @@ test('played system → settlement → history critical flow',async({page})=>{
   await page.getByRole('button',{name:'Sistemi'}).first().click();
   await page.getByRole('button',{name:'Genera sistema'}).click();
   await expect(page.getByText('COMBINAZIONI')).toBeVisible();
-  await page.getByText('Dati della giocata reale').click();
+  await page.getByText('Quote di esecuzione · reale o paper').click();
   await page.getByRole('spinbutton',{name:'Quota effettiva 1'}).fill('1.90');
   await page.getByRole('button',{name:'L’ho giocato'}).click();
   await expect(page.getByText('Sistema registrato come realmente giocato.')).toBeVisible();
@@ -70,6 +71,15 @@ test('played system → settlement → history critical flow',async({page})=>{
   await expect(page.getByText('1 elementi elaborati · 1 fixture interrogate.')).toBeVisible();
   await expect(page.locator('strong.status-win')).toHaveText('WIN');
   await expect(page.getByText(/Prediction/)).toBeVisible();
+});
+
+test('paper trading dashboard keeps virtual bankroll separate',async({page})=>{
+  await mockApi(page);
+  await page.goto('/');
+  await page.getByRole('button',{name:'Statistiche'}).first().click();
+  await expect(page.getByRole('heading',{name:'Portafoglio simulato'})).toBeVisible();
+  await expect(page.getByRole('spinbutton',{name:'Bankroll paper trading'})).toHaveValue('1000');
+  await expect(page.getByText('P/L VIRTUALE')).toBeVisible();
 });
 
 test('match detail exposes form lineup injuries and quantitative motivation progressively',async({page})=>{
