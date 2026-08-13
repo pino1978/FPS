@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { PrismaService } from './services';
 
 type PredictionMetricRow = {
@@ -24,7 +25,7 @@ type BetMetricRow = {
 export class AnalyticsService {
   constructor(private db: PrismaService) {}
 
-  async runBacktest(input: { competition: string; modelVersion: string; from: Date; to: Date }) {
+  async runBacktest(input: { competition: string; season?: string; modelVersion: string; from: Date; to: Date }) {
     const fixtures = await this.db.fixture.findMany({
       where: { competition: input.competition, utcDate: { gte: input.from, lte: input.to } },
       select: { id: true },
@@ -41,14 +42,37 @@ export class AnalyticsService {
     });
 
     const eligible = runs.filter((run) => run.asOf.getTime() < run.eventAt.getTime() && run.inputSnapshot != null);
-    const settled = eligible.flatMap((run) => run.snapshots.filter((s) => s.settlement?.outcome === 'WIN' || s.settlement?.outcome === 'LOSS'));
-    const brierScore = settled.length
-      ? settled.reduce((sum, s) => sum + Math.pow(s.probability - (s.settlement?.outcome === 'WIN' ? 1 : 0), 2), 0) / settled.length
-      : null;
-    const logLoss = settled.length
-      ? settled.reduce((sum, s) => sum + binaryLogLoss(s.probability, s.settlement?.outcome === 'WIN'), 0) / settled.length
-      : null;
-    const hitRate = settled.length ? settled.filter((s) => s.settlement?.outcome === 'WIN').length / settled.length : null;
+    const settled = eligible.flatMap((run) => run.snapshots
+      .filter((s) => s.settlement?.outcome === 'WIN' || s.settlement?.outcome === 'LOSS')
+      .map((s) => ({...s, runModelVersion:run.modelVersion, runAsOf:run.asOf})));
+    const rows:PredictionMetricRow[] = settled.map((s) => ({
+      market:s.market,probability:s.probability,confidence:s.confidence,
+      outcome:s.settlement!.outcome as 'WIN'|'LOSS',modelVersion:s.runModelVersion,
+      competition:input.competition,capturedAt:s.createdAt,
+    }));
+    const summary=summarizePredictions(rows);
+    const calibration=calibrationBuckets(rows);
+    const calibrationError=expectedCalibrationError(calibration,rows.length);
+    const virtualRows=settled.filter((s)=>s.status==='ACTIVE'&&s.offeredOdds!=null).map((s)=>({
+      market:s.market,competition:input.competition,bookmaker:'HISTORICAL_ODDS',stake:1,
+      odds:s.offeredOdds,status:s.settlement!.outcome,playedAt:s.createdAt,
+    } satisfies BetMetricRow));
+    const virtualBetting=summarizeBets(virtualRows);
+    const season=input.season?.trim()||deriveSeason(input.from,input.to);
+    const snapshotIds=settled.map((s)=>s.id).sort();
+    const inputFingerprint=createHash('sha256').update(JSON.stringify(settled.map((s)=>[
+      s.id,s.market,s.selection,s.probability,s.confidence,s.dataQuality,s.offeredOdds,s.settlement?.outcome,s.runModelVersion,s.runAsOf.toISOString(),
+    ]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))))).digest('hex');
+
+    const prior=await this.db.backtestRun.findMany({
+      where:{competition:input.competition,modelVersion:input.modelVersion,fromDate:input.from,toDate:input.to},
+      orderBy:{createdAt:'desc'},take:20,
+    });
+    const reusable=prior.find((run)=>{
+      const p=run.parameters as any;
+      return p?.season===season&&p?.inputFingerprint===inputFingerprint;
+    });
+    if(reusable)return {...reusable,reused:true};
 
     return this.db.backtestRun.create({
       data: {
@@ -56,14 +80,23 @@ export class AnalyticsService {
         modelVersion: input.modelVersion,
         fromDate: input.from,
         toDate: input.to,
-        sample: settled.length,
-        brierScore,
-        hitRate,
+        sample: rows.length,
+        brierScore: summary.brierScore,
+        hitRate: summary.hitRate,
         parameters: {
+          season,
           methodology: 'walk-forward-immutable-prediction-replay',
           antiLeakage: 'asOf < eventAt AND inputSnapshot != null',
           eligiblePredictionRuns: eligible.length,
-          logLoss,
+          snapshotIds,
+          inputFingerprint,
+          logLoss:summary.logLoss,
+          calibration,
+          calibrationError,
+          byMarket:groupPredictionMetrics(rows,(x)=>x.market),
+          byConfidence:groupPredictionMetrics(rows,(x)=>confidenceBand(x.confidence)),
+          byPeriod:groupPredictionMetrics(rows,(x)=>monthKey(x.capturedAt)),
+          virtualBetting:{...virtualBetting,coverage:rows.length?virtualRows.length/rows.length:null,rule:'flat stake = 1 only when historical offeredOdds exists'},
         },
       },
     });
@@ -141,17 +174,7 @@ export class AnalyticsService {
       capturedAt:s.createdAt,
     }));
     const modelPerformance = summarizePredictions(predictionRows);
-
-    const calibration = Array.from({ length: 10 }, (_, index) => {
-      const min = index / 10, max = (index + 1) / 10;
-      const bucket = predictionRows.filter((s) => s.probability >= min && (index === 9 ? s.probability <= max : s.probability < max));
-      return {
-        range: `${Math.round(min * 100)}-${Math.round(max * 100)}%`,
-        sample: bucket.length,
-        predicted: bucket.length ? bucket.reduce((sum, s) => sum + s.probability, 0) / bucket.length : null,
-        observed: bucket.length ? bucket.filter((s) => s.outcome === 'WIN').length / bucket.length : null,
-      };
-    });
+    const calibration = calibrationBuckets(predictionRows);
 
     const real = await this.db.bet.findMany({
       where: { played: true, simulated: false, verificationStatus: 'VERIFIED', status: { in: ['WIN', 'LOSS', 'VOID'] } },
@@ -179,6 +202,7 @@ export class AnalyticsService {
       modelPerformance: {
         ...modelPerformance,
         calibration,
+        calibrationError:expectedCalibrationError(calibration,predictionRows.length),
         byMarket: groupPredictionMetrics(predictionRows, (x) => x.market),
         byCompetition: groupPredictionMetrics(predictionRows, (x) => x.competition),
         byConfidence: groupPredictionMetrics(predictionRows, (x) => confidenceBand(x.confidence)),
@@ -226,6 +250,17 @@ export function summarizeBets(rows:BetMetricRow[]){
   };
 }
 
+function calibrationBuckets(rows:PredictionMetricRow[]){
+  return Array.from({length:10},(_,index)=>{
+    const min=index/10,max=(index+1)/10;
+    const bucket=rows.filter((s)=>s.probability>=min&&(index===9?s.probability<=max:s.probability<max));
+    return {range:`${Math.round(min*100)}-${Math.round(max*100)}%`,sample:bucket.length,predicted:bucket.length?bucket.reduce((sum,s)=>sum+s.probability,0)/bucket.length:null,observed:bucket.length?bucket.filter((s)=>s.outcome==='WIN').length/bucket.length:null};
+  });
+}
+function expectedCalibrationError(buckets:Array<{sample:number;predicted:number|null;observed:number|null}>,sample:number){
+  if(!sample)return null;
+  return buckets.reduce((sum,b)=>sum+(b.sample/sample)*Math.abs((b.predicted??0)-(b.observed??0)),0);
+}
 function groupPredictionMetrics(rows:PredictionMetricRow[],key:(row:PredictionMetricRow)=>string){
   const groups=new Map<string,PredictionMetricRow[]>();
   for(const row of rows){const k=key(row);groups.set(k,[...(groups.get(k)??[]),row])}
@@ -253,3 +288,4 @@ function summarizeSystems(systems:any[]){
 function betReturn(row:{status:string;stake:number;odds:number|null}){return row.status==='WIN'?row.stake*(row.odds??1):row.status==='VOID'?row.stake:0}
 function confidenceBand(value:number){const start=Math.min(90,Math.floor(Math.max(0,value)*10)*10);return `${start}-${start+10}%`}
 function monthKey(value:Date|null){return value?value.toISOString().slice(0,7):'UNKNOWN'}
+function deriveSeason(from:Date,to:Date){return from.getUTCFullYear()===to.getUTCFullYear()?String(from.getUTCFullYear()):`${from.getUTCFullYear()}-${to.getUTCFullYear()}`}
