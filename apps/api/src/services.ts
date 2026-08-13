@@ -1,9 +1,9 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { parseForm } from '@fps/domain';
+import { parseForm, type VenueMetrics } from '@fps/domain';
 
 export type Fixture={id:string;utcDate:string;status:string;home:{id:string;name:string};away:{id:string;name:string}};
-export type Standing={teamId:string;played:number;points:number;goalsFor:number;goalsAgainst:number;formIndex?:number};
+export type Standing={teamId:string;played:number;points:number;goalsFor:number;goalsAgainst:number;formIndex?:number;home?:VenueMetrics;away?:VenueMetrics};
 export type MatchResult={id:string;status:string;home:number|null;away:number|null;lastUpdated?:string;scorers:string[]};
 export type Scorer={playerId:string;playerName:string;teamId:string;teamName:string;goals:number;assists:number;penalties:number;position?:string};
 export type PlayerAvailability={playerName:string;teamName:string;type?:string;reason?:string};
@@ -58,22 +58,30 @@ export class FootballProvider {
 
   async fixtures(competition='SA',date?:string):Promise<Fixture[]>{const q=new URLSearchParams();if(date){q.set('dateFrom',date);q.set('dateTo',date)}const d=await this.footballData(`/competitions/${competition}/matches?${q}`,{},5*60_000);return (d.matches||[]).map((m:any)=>({id:String(m.id),utcDate:m.utcDate,status:m.status,home:{id:String(m.homeTeam.id),name:m.homeTeam.name},away:{id:String(m.awayTeam.id),name:m.awayTeam.name}}));}
 
-  async standings(competition='SA'):Promise<Standing[]>{const d=await this.footballData(`/competitions/${competition}/standings`,{},15*60_000);const total=(d.standings||[]).find((x:any)=>x.type==='TOTAL')?.table||[];return total.map((r:any)=>({teamId:String(r.team.id),played:r.playedGames,points:r.points,goalsFor:r.goalsFor,goalsAgainst:r.goalsAgainst,formIndex:parseForm(r.form)}));}
+  async standings(competition='SA'):Promise<Standing[]>{
+    const d=await this.footballData(`/competitions/${competition}/standings`,{},15*60_000);
+    const standings=d.standings||[];
+    const total=tableByType(standings,'TOTAL'),home=tableByType(standings,'HOME'),away=tableByType(standings,'AWAY');
+    return [...total.values()].map((r:any)=>({
+      teamId:String(r.team.id),played:r.playedGames,points:r.points,goalsFor:r.goalsFor,goalsAgainst:r.goalsAgainst,formIndex:parseForm(r.form),
+      home:venueMetrics(home.get(String(r.team.id))),away:venueMetrics(away.get(String(r.team.id))),
+    }));
+  }
 
   async scorers(competition='SA',limit=50):Promise<Scorer[]>{const d=await this.footballData(`/competitions/${competition}/scorers?limit=${limit}`,{},30*60_000);return (d.scorers||[]).map((s:any)=>({playerId:String(s.player.id),playerName:s.player.name,teamId:String(s.team.id),teamName:s.team.name,goals:Number(s.goals||0),assists:Number(s.assists||0),penalties:Number(s.penalties||0),position:s.player?.position||undefined}));}
 
   async matchDetails(matchId:string){return this.footballData(`/matches/${encodeURIComponent(matchId)}`,{'X-Unfold-Lineups':'true','X-Unfold-Goals':'true'},60_000);}
 
   async enrichment(utcDate:string,homeName:string,awayName:string):Promise<Enrichment>{
-    if(!process.env.API_FOOTBALL_KEY)return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};
+    if(!process.env.API_FOOTBALL_KEY)return unavailableEnrichment();
     try{
       const date=utcDate.slice(0,10);const fixtures=await this.apiFootball(`/fixtures?date=${date}&timezone=UTC`,5*60_000);const target=(fixtures.response||[]).find((x:any)=>sameTeam(x.teams?.home?.name,homeName)&&sameTeam(x.teams?.away?.name,awayName));
-      if(!target)return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};
+      if(!target)return unavailableEnrichment();
       const providerFixtureId=String(target.fixture.id);const [lineupResult,injuryResult]=await Promise.allSettled([this.apiFootball(`/fixtures/lineups?fixture=${providerFixtureId}`,2*60_000),this.apiFootball(`/injuries?fixture=${providerFixtureId}`,5*60_000)]);
       const lineups=lineupResult.status==='fulfilled'?(lineupResult.value.response||[]):[];const injuries=injuryResult.status==='fulfilled'?(injuryResult.value.response||[]):[];
       const homeLine=lineups.find((l:any)=>sameTeam(l.team?.name,homeName));const awayLine=lineups.find((l:any)=>sameTeam(l.team?.name,awayName));
       return {source:'API_FOOTBALL',providerFixtureId,homeStarters:names(homeLine?.startXI),awayStarters:names(awayLine?.startXI),homeBench:names(homeLine?.substitutes),awayBench:names(awayLine?.substitutes),injuries:injuries.map((i:any)=>({playerName:i.player?.name||'',teamName:i.team?.name||'',type:i.player?.type,reason:i.player?.reason})).filter((i:PlayerAvailability)=>!!i.playerName),availabilityVerified:injuryResult.status==='fulfilled'};
-    }catch{return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};}
+    }catch{return unavailableEnrichment();}
   }
 
   async odds(providerFixtureId:string):Promise<OfferedOdd[]>{
@@ -96,6 +104,9 @@ export class FootballProvider {
   }
 }
 
+function unavailableEnrichment():Enrichment{return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};}
+function tableByType(standings:any[],type:string){return new Map<string,any>(((standings.find((x:any)=>x.type===type)?.table)||[]).map((r:any)=>[String(r.team.id),r]));}
+function venueMetrics(r:any):VenueMetrics|undefined{return r?{played:Number(r.playedGames||0),points:Number(r.points||0),goalsFor:Number(r.goalsFor||0),goalsAgainst:Number(r.goalsAgainst||0)}:undefined;}
 function sleep(ms:number){return new Promise(resolve=>setTimeout(resolve,ms));}
 function mapOdd(name:string|undefined,value:string|undefined){const n=(name||'').toLowerCase(),v=(value||'').trim();if(n.includes('match winner')){if(/^home$/i.test(v))return {market:'1X2',selection:'1'};if(/^draw$/i.test(v))return {market:'1X2',selection:'X'};if(/^away$/i.test(v))return {market:'1X2',selection:'2'};}if(n.includes('goals over/under')&&!n.includes('half')){const m=v.match(/(Over|Under)\s*(\d+(?:\.\d+)?)/i);if(m)return {market:`OVER_UNDER_${m[2].replace('.','_')}`,selection:`${m[1].toUpperCase()} ${m[2]}`};}if(n.includes('both teams')||n.includes('both team')){if(/^yes$/i.test(v))return {market:'BTTS',selection:'GOAL'};if(/^no$/i.test(v))return {market:'BTTS',selection:'NO GOAL'};}return null;}
 function names(list:any[]|undefined){return (list||[]).map((x:any)=>x.player?.name).filter(Boolean);}
