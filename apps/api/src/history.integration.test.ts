@@ -42,10 +42,11 @@ describe('history prediction origin',()=>{
     expect(predictions[0].fixture.homeTeam).toBe('Juventus');
   });
 
-  it('requires actual odds for a real bet and preserves the original prediction when execution changes',async()=>{
+  it('requires execution odds for real and paper bets and preserves the original prediction when execution changes',async()=>{
     const seeded=await seedPrediction();
     const history=new HistoryController(db);
-    await expect(history.createBet({fixtureId:'fx-origin',market:'1X2',selection:'1',stake:10,eventAt:seeded.eventAt.toISOString(),played:true})).rejects.toThrow('actual odds are required');
+    await expect(history.createBet({fixtureId:'fx-origin',market:'1X2',selection:'1',stake:10,eventAt:seeded.eventAt.toISOString(),played:true})).rejects.toThrow('execution odds are required');
+    await expect(history.createBet({fixtureId:'fx-origin',market:'1X2',selection:'1',stake:10,eventAt:seeded.eventAt.toISOString(),simulated:true})).rejects.toThrow('execution odds are required');
     const saved:any=await history.createBet({fixtureId:'fx-origin',market:'1X2',selection:'1',stake:10,eventAt:seeded.eventAt.toISOString(),played:false});
     const origin=saved.originalPrediction;
     const played:any=await history.updateBetExecution(saved.id,{mode:'PLAYED',odds:1.9,bookmaker:'Test Book'});
@@ -62,12 +63,13 @@ describe('history prediction origin',()=>{
     expect(system.selections[0].originCapturedAt).toBeTruthy();
   });
 
-  it('requires an actual odd for every selection before a system can be marked PLAYED',async()=>{
+  it('requires an execution odd for every selection before a system can be marked PLAYED or SIMULATED',async()=>{
     const seeded=await seedPrediction();
     const controller=new AppController({} as any,db,{} as any);
     const history=new HistoryController(db);
     const incomplete:any=await controller.saveSystem({mode:'MANUAL',budget:10,totalCost:1,played:false,selections:[{clientKey:'pick-1',fixtureId:'fx-origin',market:'1X2',selection:'1',eventAt:seeded.eventAt.toISOString()}],combinations:[{selectionKeys:['pick-1'],stake:1}]});
-    await expect(history.updateSystemExecution(incomplete.id,{mode:'PLAYED'})).rejects.toThrow('actual odds are required');
+    await expect(history.updateSystemExecution(incomplete.id,{mode:'PLAYED'})).rejects.toThrow('execution odds are required');
+    await expect(history.updateSystemExecution(incomplete.id,{mode:'SIMULATED'})).rejects.toThrow('execution odds are required');
 
     const complete:any=await controller.saveSystem({mode:'MANUAL',budget:10,totalCost:1,played:false,selections:[{clientKey:'pick-2',fixtureId:'fx-origin',market:'1X2',selection:'1',eventAt:seeded.eventAt.toISOString(),odds:1.9}],combinations:[{selectionKeys:['pick-2'],stake:1}]});
     const played:any=await history.updateSystemExecution(complete.id,{mode:'PLAYED',bookmaker:'Test Book'});
