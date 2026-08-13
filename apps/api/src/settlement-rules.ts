@@ -3,6 +3,7 @@ export type SettlementContext = { home: number; away: number; scorers?: string[]
 
 const norm = (value: string) => value.toUpperCase().trim();
 const person = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+const scorerName = (value: string) => value.replace(/\s+(segna|to score|scores?)\s*$/i, '').trim();
 
 export function settleMvpMarket(market: string, selection: string, ctx: SettlementContext): SettlementDecision {
   const s = norm(selection);
@@ -95,7 +96,7 @@ export function settleMvpMarket(market: string, selection: string, ctx: Settleme
 
   if (market === 'ANYTIME_SCORER') {
     if (!ctx.scorers) return 'UNSUPPORTED';
-    const target = person(selection);
+    const target = person(scorerName(selection));
     return ctx.scorers.some((name) => person(name) === target) ? 'WIN' : 'LOSS';
   }
 
