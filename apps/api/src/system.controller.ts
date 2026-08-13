@@ -1,8 +1,29 @@
 import { Body, Controller, Post } from '@nestjs/common';
-import { buildSystemWithFixed, optimizeSystem, Selection, suggestAssistedSystem } from '@fps/domain';
+import { buildSystemWithFixed, compatibility, correlation, optimizeSystem, Selection, suggestAssistedSystem } from '@fps/domain';
 
 @Controller('v2/systems')
 export class SystemController {
+  @Post('analyze')
+  analyze(@Body() body: { selections: Selection[] }) {
+    const selections = validSelections(body?.selections);
+    const incompatible: Array<{left:string;right:string}> = [];
+    const correlations: Array<{left:string;right:string;score:number;level:string;reason:string;rulesetVersion:string}> = [];
+    for (let i = 0; i < selections.length; i++) for (let j = i + 1; j < selections.length; j++) {
+      const left = selections[i], right = selections[j];
+      if (compatibility(left, right) === 'INCOMPATIBLE') incompatible.push({ left:left.id, right:right.id });
+      else {
+        const c = correlation(left, right);
+        correlations.push({ left:left.id, right:right.id, score:c.score, level:c.level, reason:c.reason, rulesetVersion:c.rulesetVersion });
+      }
+    }
+    return {
+      status: incompatible.length ? 'INCOMPATIBLE' as const : 'COMPATIBLE' as const,
+      incompatible,
+      correlations,
+      maxCorrelation: correlations.length ? Math.max(...correlations.map((x) => x.score)) : 0,
+    };
+  }
+
   @Post('build')
   build(@Body() body: { selections: Selection[]; k: number; stake: number; budget?: number; fixedIds?: string[] }) {
     const selections = validSelections(body?.selections);
