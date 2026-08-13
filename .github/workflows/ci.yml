@@ -77,5 +77,7 @@ jobs:
           node -e "const x=require('/tmp/fd.json'); if(!x.standings) process.exit(1); console.log('football-data authenticated smoke: OK')"
       - name: Generate Prisma client for API imports
         run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: Build domain engines for live smoke
+        run: npm run build -w @fps/domain && npm run build -w @fps/player-engine
       - name: Real Serie A adapter to prediction smoke
         run: npx vitest run apps/api/src/live-serie-a.smoke.test.ts --maxWorkers=1 --minWorkers=1
