@@ -127,6 +127,12 @@ model Bet {
   createdAt          DateTime  @default(now())
   verifiedAt         DateTime?
   resultVersion      String?
+  originProbability  Float?
+  originConfidence   Float?
+  originDataQuality  Float?
+  originFairOdds     Float?
+  originModelVersion String?
+  originCapturedAt   DateTime?
 
   @@index([played, verificationStatus, eventAt])
   @@index([simulated, verificationStatus, eventAt])
@@ -162,6 +168,11 @@ model SystemSelection {
   selection          String
   eventAt            DateTime
   odds               Float?
+  originProbability  Float?
+  originConfidence   Float?
+  originDataQuality  Float?
+  originFairOdds     Float?
+  originModelVersion String?
   status             String            @default("PENDING")
   verificationStatus String            @default("PENDING")
   verifiedAt         DateTime?
