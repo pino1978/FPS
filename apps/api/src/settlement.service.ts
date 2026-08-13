@@ -9,6 +9,7 @@ export class SettlementService {
   private readonly log = new Logger(SettlementService.name);
   private running = false;
   private resultCache = new Map<string, any>();
+  private providerFetches = 0;
 
   constructor(private football: FootballProvider, private db: PrismaService) {}
 
@@ -21,31 +22,67 @@ export class SettlementService {
 
   private async verifiedResult(fixtureId: string) {
     if (this.resultCache.has(fixtureId)) return this.resultCache.get(fixtureId);
+    const stored = await this.db.fixture.findUnique({ where: { id: fixtureId } });
+    if (stored?.resultVerified) {
+      const evidence = (stored.resultEvidence as any) || {};
+      const consolidated = {
+        id: fixtureId,
+        status: stored.status,
+        home: stored.homeScore,
+        away: stored.awayScore,
+        scorers: Array.isArray(evidence.scorers) ? evidence.scorers : [],
+        version: stored.resultVersion || `stored:${fixtureId}`,
+        cancelled: stored.status === 'CANCELLED',
+        consolidated: true,
+      };
+      this.resultCache.set(fixtureId, consolidated);
+      return consolidated;
+    }
+
     const result = await this.football.result(fixtureId);
-    const verified = result.status === 'FINISHED' && result.home != null && result.away != null
-      ? { ...result, version: `fd:${fixtureId}:${result.lastUpdated || 'v1'}` }
-      : null;
+    this.providerFetches++;
+    const version = `fd:${fixtureId}:${result.lastUpdated || 'v1'}`;
+    const finished = result.status === 'FINISHED' && result.home != null && result.away != null;
+    const cancelled = result.status === 'CANCELLED';
+    if (!finished && !cancelled) {
+      this.resultCache.set(fixtureId, null);
+      return null;
+    }
+    const verified = { ...result, version, cancelled, consolidated: true };
+    await this.db.fixture.updateMany({
+      where: { id: fixtureId, resultVerified: false },
+      data: {
+        status: result.status,
+        homeScore: result.home,
+        awayScore: result.away,
+        resultVerified: true,
+        verifiedAt: new Date(),
+        resultVersion: version,
+        resultEvidence: { scorers: result.scorers, providerStatus: result.status, providerLastUpdated: result.lastUpdated || null },
+      },
+    });
     this.resultCache.set(fixtureId, verified);
     return verified;
   }
 
   async run() {
     this.resultCache = new Map();
+    this.providerFetches = 0;
     const results: any[] = [];
     await this.settleBets(results);
     await this.settleSystems(results);
     await this.settlePredictions(results);
-    return { processed: results.length, fixturesFetched: this.resultCache.size, results };
+    return { processed: results.length, fixturesFetched: this.providerFetches, fixturesResolved: this.resultCache.size, results };
   }
 
   private async settleBets(out: any[]) {
     const pending = await this.db.bet.findMany({
       where: { OR: [{ played: true }, { simulated: true }], verificationStatus: 'PENDING', verifiedAt: null },
     });
-    for (const bet of pending.filter((b) => settlementEligible(b.eventAt, false))) {
+    for (const bet of pending.filter((b) => settlementEligible(b.eventAt, false, new Date(), settlementMarginMinutes()))) {
       const result = await this.verifiedResult(bet.fixtureId);
       if (!result) { out.push({ type: 'BET', id: bet.id, status: 'WAITING' }); continue; }
-      const decision = settleMvpMarket(bet.market, bet.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
+      const decision = result.cancelled ? 'VOID' : settleMvpMarket(bet.market, bet.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
       if (decision === 'UNSUPPORTED') { out.push({ type: 'BET', id: bet.id, status: 'UNSUPPORTED' }); continue; }
       const updated = await this.db.bet.updateMany({
         where: { id: bet.id, verificationStatus: 'PENDING', verifiedAt: null },
@@ -59,10 +96,10 @@ export class SettlementService {
     const selections = await this.db.systemSelection.findMany({
       where: { verificationStatus: 'PENDING', verifiedAt: null, system: { OR: [{ played: true }, { simulated: true }] } },
     });
-    for (const pick of selections.filter((s) => settlementEligible(s.eventAt, false))) {
+    for (const pick of selections.filter((s) => settlementEligible(s.eventAt, false, new Date(), settlementMarginMinutes()))) {
       const result = await this.verifiedResult(pick.fixtureId);
       if (!result) { out.push({ type: 'SYSTEM_SELECTION', id: pick.id, status: 'WAITING' }); continue; }
-      const decision = settleMvpMarket(pick.market, pick.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
+      const decision = result.cancelled ? 'VOID' : settleMvpMarket(pick.market, pick.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
       if (decision === 'UNSUPPORTED') { out.push({ type: 'SYSTEM_SELECTION', id: pick.id, status: 'UNSUPPORTED' }); continue; }
       const updated = await this.db.systemSelection.updateMany({
         where: { id: pick.id, verificationStatus: 'PENDING', verifiedAt: null },
@@ -107,8 +144,9 @@ export class SettlementService {
   }
 
   private async settlePredictions(out: any[]) {
+    const cutoff = new Date(Date.now() - settlementMarginMinutes() * 60_000);
     const runs = await this.db.predictionRun.findMany({
-      where: { eventAt: { lte: new Date(Date.now() - 150 * 60000) }, snapshots: { some: { settlement: null } } },
+      where: { eventAt: { lte: cutoff }, snapshots: { some: { settlement: null } } },
       include: { snapshots: { include: { settlement: true } } },
     });
     for (const run of runs) {
@@ -117,7 +155,9 @@ export class SettlementService {
       for (const prediction of run.snapshots.filter((x) => x.settlement === null)) {
         const outcome = prediction.status === 'NO_BET'
           ? 'NO_BET'
-          : settleMvpMarket(prediction.market, prediction.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
+          : result.cancelled
+            ? 'VOID'
+            : settleMvpMarket(prediction.market, prediction.selection, { home: result.home!, away: result.away!, scorers: result.scorers });
         if (outcome === 'UNSUPPORTED') continue;
         try {
           await this.db.predictionSettlement.create({
@@ -125,7 +165,7 @@ export class SettlementService {
               snapshotId: prediction.id,
               outcome,
               resultVersion: result.version,
-              evidence: { score: { home: result.home, away: result.away }, scorers: result.scorers },
+              evidence: { score: { home: result.home, away: result.away }, scorers: result.scorers, providerStatus: result.status },
             },
           });
           out.push({ type: 'PREDICTION', id: prediction.id, status: outcome });
@@ -137,6 +177,8 @@ export class SettlementService {
   }
 
   private async audit(entityType: string, entityId: string, decision: string, result: any) {
-    await this.db.auditEvent.create({ data: { entityType, entityId, action: 'SETTLED', payload: { decision, score: { home: result.home, away: result.away }, scorers: result.scorers, resultVersion: result.version } } });
+    await this.db.auditEvent.create({ data: { entityType, entityId, action: 'SETTLED', payload: { decision, score: { home: result.home, away: result.away }, scorers: result.scorers, providerStatus: result.status, resultVersion: result.version } } });
   }
 }
+
+function settlementMarginMinutes(){const raw=Number(process.env.SETTLEMENT_MARGIN_MINUTES||150);return Number.isFinite(raw)&&raw>=0?raw:150;}
