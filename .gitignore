@@ -9,3 +9,7 @@ coverage/
 .DS_Store
 .vscode/
 .idea/
+apps/mobile/android/
+*.apk
+*.aab
+.gradle/
