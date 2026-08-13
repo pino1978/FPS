@@ -4,6 +4,7 @@ import {Dispatch,SetStateAction,useState} from 'react';
 export type SystemPick={
   id:string;fixtureId:string;market:string;selection:string;eventAt:string;
   probability:number;confidence:number;dataQuality:number;fairOdds?:number|null;fixed?:boolean;
+  period?:'FT'|'HT';metric?:string;operator?:string;threshold?:number;outcome?:string;teamSide?:'HOME'|'AWAY';playerId?:string;
 };
 const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:4000';
 const json=async(url:string,init?:RequestInit)=>{const response=await fetch(url,init);const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body?.message||`${response.status} ${response.statusText}`);return body};
