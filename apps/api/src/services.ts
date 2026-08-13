@@ -4,7 +4,7 @@ import { parseForm } from '@fps/domain';
 
 export type Fixture={id:string;utcDate:string;status:string;home:{id:string;name:string};away:{id:string;name:string}};
 export type Standing={teamId:string;played:number;points:number;goalsFor:number;goalsAgainst:number;formIndex?:number};
-export type MatchResult={id:string;status:string;home:number|null;away:number|null;lastUpdated?:string};
+export type MatchResult={id:string;status:string;home:number|null;away:number|null;lastUpdated?:string;scorers:string[]};
 export type Scorer={playerId:string;playerName:string;teamId:string;teamName:string;goals:number;assists:number;penalties:number};
 export type PlayerAvailability={playerName:string;teamName:string;type?:string;reason?:string};
 export type Enrichment={source:'API_FOOTBALL'|'UNAVAILABLE';providerFixtureId?:string;homeStarters:string[];awayStarters:string[];homeBench:string[];awayBench:string[];injuries:PlayerAvailability[];availabilityVerified:boolean};
@@ -54,7 +54,11 @@ export class FootballProvider {
     }catch{return {source:'UNAVAILABLE',homeStarters:[],awayStarters:[],homeBench:[],awayBench:[],injuries:[],availabilityVerified:false};}
   }
 
-  async result(matchId:string):Promise<MatchResult>{const m=await this.footballData(`/matches/${encodeURIComponent(matchId)}`,{},60_000);return {id:String(m.id),status:m.status,home:m.score?.fullTime?.home??null,away:m.score?.fullTime?.away??null,lastUpdated:m.lastUpdated};}
+  async result(matchId:string):Promise<MatchResult>{
+    const m=await this.footballData(`/matches/${encodeURIComponent(matchId)}`,{'X-Unfold-Goals':'true'},60_000);
+    const scorers=(m.goals||[]).map((g:any)=>g.scorer?.name||g.player?.name).filter(Boolean);
+    return {id:String(m.id),status:m.status,home:m.score?.fullTime?.home??null,away:m.score?.fullTime?.away??null,lastUpdated:m.lastUpdated,scorers};
+  }
 }
 
 function names(list:any[]|undefined){return (list||[]).map((x:any)=>x.player?.name).filter(Boolean);}
