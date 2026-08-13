@@ -1,1 +1,1 @@
-import './styles.css';export const metadata={title:'Foresight — Football Prediction',description:'Probability-first football intelligence'};export default function Layout({children}:{children:React.ReactNode}){return <html lang="it"><body>{children}</body></html>}
+import './styles.css';import '../../mobile/src/mobile-v2-core.css';export const metadata={title:'Foresight — Football Prediction',description:'Probability-first football intelligence'};export default function Layout({children}:{children:React.ReactNode}){return <html lang="it"><body>{children}</body></html>}
