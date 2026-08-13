@@ -4,7 +4,7 @@ import { expectedMinutesFor, predictAnytimeScorer } from '@fps/player-engine';
 import { FootballProvider, PrismaService } from './services';
 import { SettlementService } from './settlement.service';
 
-type SavedSelectionInput = {clientKey:string;fixtureId:string;market:string;selection:string;eventAt:string;odds?:number};
+type SavedSelectionInput = {clientKey:string;fixtureId:string;competition?:string;market:string;selection:string;eventAt:string;odds?:number};
 type SavedCombinationInput = {selectionKeys:string[];stake:number};
 
 @Controller()
@@ -48,11 +48,33 @@ export class AppController {
 
   @Post('systems/save')
   async saveSystem(@Body() body:{mode:string;profile?:string;budget:number;totalCost:number;played:boolean;selections:SavedSelectionInput[];combinations:SavedCombinationInput[]}){
-    return this.db.$transaction(async tx=>{const system=await tx.bettingSystem.create({data:{mode:body.mode,profile:body.profile,budget:body.budget,totalCost:body.totalCost,played:body.played}});const selectionIdByKey=new Map<string,string>();for(const selection of body.selections){const saved=await tx.systemSelection.create({data:{systemId:system.id,clientKey:selection.clientKey,fixtureId:selection.fixtureId,market:selection.market,selection:selection.selection,eventAt:new Date(selection.eventAt),odds:selection.odds}});selectionIdByKey.set(selection.clientKey,saved.id)}for(const combination of body.combinations){const ids=combination.selectionKeys.map(key=>selectionIdByKey.get(key));if(ids.some(id=>!id))throw new Error('Combination contains unknown selection');await tx.systemCombination.create({data:{systemId:system.id,stake:combination.stake,items:{create:ids.map(selectionId=>({selectionId:selectionId!}))}}})}await tx.auditEvent.create({data:{entityType:'BettingSystem',entityId:system.id,action:body.played?'REAL_SYSTEM_RECORDED':'SYSTEM_SAVED',payload:{combinationCount:body.combinations.length,totalCost:body.totalCost}}});return tx.bettingSystem.findUniqueOrThrow({where:{id:system.id},include:{selections:true,combinations:{include:{items:true}}}})});
+    return this.db.$transaction(async tx=>{
+      const system=await tx.bettingSystem.create({data:{mode:body.mode,profile:body.profile,budget:body.budget,totalCost:body.totalCost,played:body.played}});
+      const selectionIdByKey=new Map<string,string>();
+      const originSnapshotIds:string[]=[];
+      for(const selection of body.selections){
+        const eventAt=new Date(selection.eventAt);
+        const origin=await tx.predictionSnapshot.findFirst({where:{market:selection.market,selection:selection.selection,run:{fixtureId:selection.fixtureId,asOf:{lt:eventAt}}},include:{run:true},orderBy:{createdAt:'desc'}});
+        const fixture=selection.competition?null:await tx.fixture.findUnique({where:{id:selection.fixtureId},select:{competition:true}});
+        const saved=await tx.systemSelection.create({data:{
+          systemId:system.id,clientKey:selection.clientKey,fixtureId:selection.fixtureId,competition:selection.competition??fixture?.competition,
+          market:selection.market,selection:selection.selection,eventAt,odds:selection.odds,
+          ...(origin?{originProbability:origin.probability,originConfidence:origin.confidence,originDataQuality:origin.dataQuality,originFairOdds:origin.fairOdds,originModelVersion:origin.run.modelVersion,originCapturedAt:origin.createdAt}:{}),
+        }});
+        if(origin)originSnapshotIds.push(origin.id);
+        selectionIdByKey.set(selection.clientKey,saved.id);
+      }
+      for(const combination of body.combinations){const ids=combination.selectionKeys.map(key=>selectionIdByKey.get(key));if(ids.some(id=>!id))throw new Error('Combination contains unknown selection');await tx.systemCombination.create({data:{systemId:system.id,stake:combination.stake,items:{create:ids.map(selectionId=>({selectionId:selectionId!}))}}})}
+      await tx.auditEvent.create({data:{entityType:'BettingSystem',entityId:system.id,action:body.played?'REAL_SYSTEM_RECORDED':'SYSTEM_SAVED',payload:{combinationCount:body.combinations.length,totalCost:body.totalCost,originSnapshotIds}}});
+      return tx.bettingSystem.findUniqueOrThrow({where:{id:system.id},include:{selections:true,combinations:{include:{items:true}}}})
+    });
   }
 
   @Get('systems') async savedSystems(){return this.db.bettingSystem.findMany({include:{selections:true,combinations:{include:{items:true}}},orderBy:{createdAt:'desc'}})}
-  @Post('bets') async createBet(@Body() body:{fixtureId:string;market:string;selection:string;stake:number;odds?:number;played:boolean;eventAt:string}){const bet=await this.db.bet.create({data:{...body,eventAt:new Date(body.eventAt)}});await this.db.auditEvent.create({data:{entityType:'Bet',entityId:bet.id,action:body.played?'REAL_BET_RECORDED':'PREDICTION_SAVED'}});return bet}
+  @Post('bets') async createBet(@Body() body:{fixtureId:string;market:string;selection:string;stake:number;odds?:number;played:boolean;eventAt:string}){
+    const eventAt=new Date(body.eventAt);const origin=await this.db.predictionSnapshot.findFirst({where:{market:body.market,selection:body.selection,run:{fixtureId:body.fixtureId,asOf:{lt:eventAt}}},include:{run:true},orderBy:{createdAt:'desc'}});
+    const bet=await this.db.bet.create({data:{...body,eventAt,...(origin?{originProbability:origin.probability,originConfidence:origin.confidence,originDataQuality:origin.dataQuality,originFairOdds:origin.fairOdds,originModelVersion:origin.run.modelVersion,originCapturedAt:origin.createdAt}:{})}});await this.db.auditEvent.create({data:{entityType:'Bet',entityId:bet.id,action:body.played?'REAL_BET_RECORDED':'PREDICTION_SAVED',payload:{originSnapshotId:origin?.id??null}}});return bet
+  }
   @Get('bets') async bets(@Query('played') played?:string){return this.db.bet.findMany({where:played===undefined?{}:{played:played==='true'},orderBy:{createdAt:'desc'}})}
 
   @Get('metrics')
