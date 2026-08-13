@@ -57,6 +57,34 @@ export function settleMvpMarket(market: string, selection: string, ctx: Settleme
     return total >= min && total <= max ? 'WIN' : 'LOSS';
   }
 
+  if (market === 'CLEAN_SHEET') {
+    if (s === 'HOME YES') return ctx.away === 0 ? 'WIN' : 'LOSS';
+    if (s === 'AWAY YES') return ctx.home === 0 ? 'WIN' : 'LOSS';
+    return 'UNSUPPORTED';
+  }
+
+  if (market === 'WIN_TO_NIL') {
+    if (s === 'HOME YES') return ctx.home > ctx.away && ctx.away === 0 ? 'WIN' : 'LOSS';
+    if (s === 'AWAY YES') return ctx.away > ctx.home && ctx.home === 0 ? 'WIN' : 'LOSS';
+    return 'UNSUPPORTED';
+  }
+
+  if (market === 'WIN_MARGIN') {
+    const margin = ctx.home - ctx.away;
+    if (s === 'HOME BY 1') return margin === 1 ? 'WIN' : 'LOSS';
+    if (s === 'HOME BY 2+') return margin >= 2 ? 'WIN' : 'LOSS';
+    if (s === 'DRAW') return margin === 0 ? 'WIN' : 'LOSS';
+    if (s === 'AWAY BY 1') return margin === -1 ? 'WIN' : 'LOSS';
+    if (s === 'AWAY BY 2+') return margin <= -2 ? 'WIN' : 'LOSS';
+    return 'UNSUPPORTED';
+  }
+
+  if (market === 'GOALS_PARITY') {
+    if (s === 'EVEN') return total % 2 === 0 ? 'WIN' : 'LOSS';
+    if (s === 'ODD') return total % 2 === 1 ? 'WIN' : 'LOSS';
+    return 'UNSUPPORTED';
+  }
+
   if (market === 'COMBO') {
     if (s === '1 + OVER 1.5') return outcome === '1' && total > 1.5 ? 'WIN' : 'LOSS';
     if (s === '2 + OVER 1.5') return outcome === '2' && total > 1.5 ? 'WIN' : 'LOSS';
