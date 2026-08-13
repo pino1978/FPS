@@ -70,6 +70,10 @@ model PredictionSnapshot {
   reason        String?
   createdAt     DateTime              @default(now())
   settlement    PredictionSettlement?
+  /// Legacy compatibility only. V2 settlement never writes these fields.
+  outcome       String?
+  settledAt     DateTime?
+  resultVersion String?
 
   @@index([status, createdAt])
   @@index([market, createdAt])
