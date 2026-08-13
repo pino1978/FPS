@@ -8,6 +8,9 @@
     "test": "npm run test -w @fps/domain && npm run test -w @fps/player-engine && npm run test -w @fps/api && npm run test -w @fps/web",
     "e2e": "playwright test",
     "dev": "concurrently \"npm run dev -w @fps/api\" \"npm run dev -w @fps/web\"",
+    "start:api": "npm run start -w @fps/api",
+    "db:migrate": "npm run db:migrate -w @fps/api",
+    "db:status": "npm run db:status -w @fps/api",
     "db:push": "npm run db:push -w @fps/api"
   },
   "overrides": {
