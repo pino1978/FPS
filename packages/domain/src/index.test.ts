@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSystem,
+  compatibility,
   correlation,
   evaluateValue,
   optimizeSystem,
@@ -8,6 +9,7 @@ import {
   predictMarkets,
   settleMarket,
   settlementEligible,
+  type Selection,
 } from './index';
 
 describe('domain', () => {
@@ -25,6 +27,48 @@ describe('domain', () => {
       { id: 'b', fixtureId: '1', market: '1X2', selection: 'X' },
     ], 2, 1);
     expect(result.status).toBe('INCOMPATIBLE');
+  });
+
+  it.each([
+    [
+      {id:'a',fixtureId:'1',market:'OVER_UNDER_3_5',selection:'OVER 3.5'},
+      {id:'b',fixtureId:'1',market:'OVER_UNDER_2_5',selection:'UNDER 2.5'},
+      'Over 3.5 + Under 2.5',
+    ],
+    [
+      {id:'a',fixtureId:'1',market:'BTTS',selection:'GOAL'},
+      {id:'b',fixtureId:'1',market:'BTTS',selection:'NO GOAL'},
+      'Goal + No Goal',
+    ],
+    [
+      {id:'a',fixtureId:'1',market:'EXACT_SCORE',selection:'1-0'},
+      {id:'b',fixtureId:'1',market:'BTTS',selection:'GOAL'},
+      '1-0 + Goal',
+    ],
+    [
+      {id:'a',fixtureId:'1',market:'EXACT_SCORE',selection:'1-0'},
+      {id:'b',fixtureId:'1',market:'OVER_UNDER_2_5',selection:'OVER 2.5'},
+      '1-0 + Over 2.5',
+    ],
+    [
+      {id:'a',fixtureId:'1',market:'HOME_GOALS_0_5',selection:'HOME UNDER 0.5'},
+      {id:'b',fixtureId:'1',market:'ANYTIME_SCORER',selection:'Player segna',teamSide:'HOME'},
+      'team no score + player scorer',
+    ],
+    [
+      {id:'a',fixtureId:'1',market:'HT_OVER_UNDER_0_5',selection:'UNDER 0.5',period:'HT'},
+      {id:'b',fixtureId:'1',market:'FIRST_HALF_SCORER',selection:'Player segna',period:'HT',teamSide:'HOME'},
+      'HT Under 0.5 + HT scorer',
+    ],
+  ] as Array<[Selection,Selection,string]>)('blocks semantic conflict %s', (a,b) => {
+    expect(compatibility(a,b)).toBe('INCOMPATIBLE');
+    expect(buildSystem([a,b],2,1).status).toBe('INCOMPATIBLE');
+  });
+
+  it('does not turn correlation into incompatibility', () => {
+    const a:Selection = { id:'a',fixtureId:'1',market:'BTTS',selection:'GOAL' };
+    const b:Selection = { id:'b',fixtureId:'1',market:'OVER_UNDER_2_5',selection:'OVER 2.5' };
+    expect(compatibility(a,b)).toBe('COMPATIBLE');
   });
 
   it('creates 20 triples from six', () => {
