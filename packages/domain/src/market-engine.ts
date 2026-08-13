@@ -5,7 +5,7 @@ export type StructuredMarket = {
   selection: string;
   probability: number;
   period: 'FT' | 'HT';
-  metric: 'RESULT' | 'TOTAL_GOALS' | 'HOME_GOALS' | 'AWAY_GOALS' | 'BTTS' | 'EXACT_SCORE' | 'GOAL_RANGE';
+  metric: 'RESULT' | 'TOTAL_GOALS' | 'HOME_GOALS' | 'AWAY_GOALS' | 'BTTS' | 'EXACT_SCORE' | 'GOAL_RANGE' | 'CLEAN_SHEET' | 'WIN_MARGIN' | 'GOAL_PARITY';
   operator?: 'OVER' | 'UNDER' | 'EQ' | 'BETWEEN' | 'OUTCOME';
   threshold?: number;
   thresholdMax?: number;
@@ -184,6 +184,27 @@ export function deriveMarkets(matrix: ScoreCell[]): StructuredMarket[] {
     const probability = sumWhere(matrix, (c) => c.home + c.away >= min && c.home + c.away <= max);
     result.push(item('MULTIGOAL', `${min}-${max} GOALS`, probability, 'GOAL_RANGE', 'BETWEEN', min, max));
   }
+
+  const homeClean = sumWhere(matrix, (c) => c.away === 0);
+  const awayClean = sumWhere(matrix, (c) => c.home === 0);
+  const homeWinToNil = sumWhere(matrix, (c) => c.home > c.away && c.away === 0);
+  const awayWinToNil = sumWhere(matrix, (c) => c.away > c.home && c.home === 0);
+  result.push(item('CLEAN_SHEET', 'HOME YES', homeClean, 'CLEAN_SHEET', 'EQ', 0, undefined, 'HOME'));
+  result.push(item('CLEAN_SHEET', 'AWAY YES', awayClean, 'CLEAN_SHEET', 'EQ', 0, undefined, 'AWAY'));
+  result.push(item('WIN_TO_NIL', 'HOME YES', homeWinToNil, 'RESULT', 'OUTCOME', undefined, undefined, 'HOME'));
+  result.push(item('WIN_TO_NIL', 'AWAY YES', awayWinToNil, 'RESULT', 'OUTCOME', undefined, undefined, 'AWAY'));
+
+  const margins = [
+    ['HOME BY 1', (c:ScoreCell)=>c.home-c.away===1],
+    ['HOME BY 2+', (c:ScoreCell)=>c.home-c.away>=2],
+    ['DRAW', (c:ScoreCell)=>c.home===c.away],
+    ['AWAY BY 1', (c:ScoreCell)=>c.away-c.home===1],
+    ['AWAY BY 2+', (c:ScoreCell)=>c.away-c.home>=2],
+  ] as const;
+  for(const [selection,predicate] of margins) result.push(item('WIN_MARGIN',selection,sumWhere(matrix,predicate),'WIN_MARGIN','OUTCOME',undefined,undefined,selection));
+  const even = sumWhere(matrix,(c)=>(c.home+c.away)%2===0);
+  result.push(item('GOALS_PARITY','EVEN',even,'GOAL_PARITY','EQ',0));
+  result.push(item('GOALS_PARITY','ODD',1-even,'GOAL_PARITY','EQ',1));
 
   const homeWinOver15 = sumWhere(matrix, (c) => c.home > c.away && c.home + c.away > 1.5);
   const awayWinOver15 = sumWhere(matrix, (c) => c.home < c.away && c.home + c.away > 1.5);
