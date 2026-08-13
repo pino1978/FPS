@@ -43,6 +43,13 @@ export type Selection = {
   probability?: number;
   confidence?: number;
   dataQuality?: number;
+  period?: 'FT' | 'HT';
+  metric?: string;
+  operator?: string;
+  threshold?: number;
+  outcome?: string;
+  teamSide?: 'HOME' | 'AWAY';
+  playerId?: string;
 };
 
 export type Compatibility = 'COMPATIBLE' | 'INCOMPATIBLE';
@@ -56,6 +63,7 @@ export type Score = { home: number; away: number };
 
 export const MODEL_VERSION = 'poisson-strength-availability-v3';
 export const CORRELATION_RULESET_VERSION = 'correlation-v1';
+export const COMPATIBILITY_RULESET_VERSION = 'compatibility-score-constraints-v2';
 
 const clamp = (n: number, min = 0, max = 1) => Math.max(min, Math.min(max, n));
 const fact = (n: number): number => (n <= 1 ? 1 : n * fact(n - 1));
@@ -141,18 +149,64 @@ export function predictMarkets(home: TeamMetrics, away: TeamMetrics): MarketPred
   ];
 }
 
-const exclusiveMarkets = new Set(['1X2', 'BTTS', 'DRAW_NO_BET']);
+type ScoreConstraint = { period: 'FT' | 'HT'; test: (score: Score) => boolean };
+
 export function compatibility(a: Selection, b: Selection): Compatibility {
   if (a.fixtureId !== b.fixtureId) return 'COMPATIBLE';
+  const ax = semanticConstraint(a), bx = semanticConstraint(b);
+  if (!ax || !bx || ax.period !== bx.period) return fallbackCompatibility(a, b);
+  for (let home = 0; home <= 12; home++) for (let away = 0; away <= 12; away++) {
+    const score = { home, away };
+    if (ax.test(score) && bx.test(score)) return 'COMPATIBLE';
+  }
+  return 'INCOMPATIBLE';
+}
+
+function semanticConstraint(input: Selection): ScoreConstraint | null {
+  const market = input.market.toUpperCase();
+  const selection = input.selection.toUpperCase().trim();
+  const period: 'FT' | 'HT' = input.period ?? (market.includes('FIRST_HALF') || market.startsWith('HT_') ? 'HT' : 'FT');
+  const result = (outcome: string) => (s: Score) => outcome === '1' ? s.home > s.away : outcome === '2' ? s.home < s.away : s.home === s.away;
+
+  if (market === '1X2' || market === 'HT_1X2') return { period, test: result(selection) };
+  if (market === 'DOUBLE_CHANCE') return { period, test: (s) => selection === '1X' ? s.home >= s.away : selection === 'X2' ? s.home <= s.away : selection === '12' ? s.home !== s.away : true };
+  if (market === 'DRAW_NO_BET') return { period, test: (s) => s.home === s.away || (selection.startsWith('1') ? s.home > s.away : selection.startsWith('2') ? s.home < s.away : true) };
+  if (market === 'BTTS' || market === 'HT_BTTS') return { period, test: (s) => selection === 'GOAL' ? s.home > 0 && s.away > 0 : selection === 'NO GOAL' ? s.home === 0 || s.away === 0 : true };
+  if (market === 'EXACT_SCORE' || market === 'HT_EXACT_SCORE') {
+    const m = selection.match(/^(\d+)\s*-\s*(\d+)$/); if (!m) return null;
+    const home = Number(m[1]), away = Number(m[2]); return { period, test: (s) => s.home === home && s.away === away };
+  }
+  const ou = selection.match(/(OVER|UNDER)\s*(\d+(?:\.\d+)?)/);
+  if (ou && (market.startsWith('OVER_UNDER_') || market.startsWith('HT_OVER_UNDER_'))) {
+    const line = Number(ou[2]); return { period, test: (s) => ou[1] === 'OVER' ? s.home + s.away > line : s.home + s.away < line };
+  }
+  if (ou && market.startsWith('HOME_GOALS_')) {
+    const line = Number(ou[2]); return { period, test: (s) => ou[1] === 'OVER' ? s.home > line : s.home < line };
+  }
+  if (ou && market.startsWith('AWAY_GOALS_')) {
+    const line = Number(ou[2]); return { period, test: (s) => ou[1] === 'OVER' ? s.away > line : s.away < line };
+  }
+  if (market === 'CLEAN_SHEET') {
+    if (selection.startsWith('HOME')) return { period, test: (s) => s.away === 0 };
+    if (selection.startsWith('AWAY')) return { period, test: (s) => s.home === 0 };
+  }
+  if (market === 'WIN_TO_NIL') {
+    if (selection.startsWith('HOME')) return { period, test: (s) => s.home > s.away && s.away === 0 };
+    if (selection.startsWith('AWAY')) return { period, test: (s) => s.away > s.home && s.home === 0 };
+  }
+  if (market === 'ANYTIME_SCORER' || market === 'FIRST_HALF_SCORER' || market === 'HT_SCORER') {
+    if (input.teamSide === 'HOME') return { period, test: (s) => s.home > 0 };
+    if (input.teamSide === 'AWAY') return { period, test: (s) => s.away > 0 };
+    return { period, test: (s) => s.home + s.away > 0 };
+  }
+  return null;
+}
+
+function fallbackCompatibility(a: Selection, b: Selection): Compatibility {
   const x = a.selection.toUpperCase(), y = b.selection.toUpperCase();
+  const exclusiveMarkets = new Set(['1X2', 'BTTS', 'DRAW_NO_BET', 'EXACT_SCORE']);
   if (a.market === b.market && exclusiveMarkets.has(a.market) && x !== y) return 'INCOMPATIBLE';
   if ((x === 'GOAL' && y === 'NO GOAL') || (y === 'GOAL' && x === 'NO GOAL')) return 'INCOMPATIBLE';
-  const overUnder = (selection: string) => selection.match(/(OVER|UNDER)\s*(\d+(?:\.\d+)?)/);
-  const ax = overUnder(x), by = overUnder(y);
-  if (ax && by && ax[1] !== by[1]) {
-    const aLine = Number(ax[2]), bLine = Number(by[2]);
-    if ((ax[1] === 'OVER' && aLine >= bLine) || (by[1] === 'OVER' && bLine >= aLine)) return 'INCOMPATIBLE';
-  }
   return 'COMPATIBLE';
 }
 
