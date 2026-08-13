@@ -57,10 +57,18 @@ describe('market engine', () => {
     expect(line[0].probability + line[1].probability).toBeCloseTo(1, 6);
   });
 
-  it('exposes all MVP core market families', () => {
+  it('exposes all score-derived SRS core market families', () => {
     const markets = predictFixture(home, away).markets;
-    for (const family of ['1X2', 'DOUBLE_CHANCE', 'DRAW_NO_BET', 'OVER_UNDER_0_5', 'OVER_UNDER_4_5', 'BTTS', 'EXACT_SCORE', 'MULTIGOAL', 'COMBO']) {
+    for (const family of ['1X2', 'DOUBLE_CHANCE', 'DRAW_NO_BET', 'OVER_UNDER_0_5', 'OVER_UNDER_4_5', 'BTTS', 'HOME_GOALS_0_5', 'AWAY_GOALS_0_5', 'EXACT_SCORE', 'MULTIGOAL', 'CLEAN_SHEET', 'WIN_TO_NIL', 'WIN_MARGIN', 'GOALS_PARITY', 'COMBO']) {
       expect(markets.some((m) => m.market === family)).toBe(true);
     }
+  });
+
+  it('keeps complementary score-derived market probabilities coherent', () => {
+    const markets=predictFixture(home,away).markets;
+    const parity=markets.filter(m=>m.market==='GOALS_PARITY');
+    expect(parity.reduce((s,m)=>s+m.probability,0)).toBeCloseTo(1,6);
+    const margin=markets.filter(m=>m.market==='WIN_MARGIN');
+    expect(margin.reduce((s,m)=>s+m.probability,0)).toBeCloseTo(1,6);
   });
 });
