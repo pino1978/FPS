@@ -1,7 +1,13 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { MODEL_VERSION } from '@fps/domain';
-import { MODEL_CONFIG_VERSION, predictFixture } from '@fps/domain/market-engine';
+import { MODEL_CONFIG_VERSION, MODEL_VERSION, predictFixture, StructuredMarket } from '@fps/domain';
 import { FootballProvider, PrismaService, Standing } from './services';
+
+type PresentedMarket = StructuredMarket & {
+  confidence: number;
+  dataQuality: number;
+  status: 'ACTIVE' | 'NO_BET';
+  reason?: string;
+};
 
 @Controller('v2')
 export class PredictionController {
@@ -28,25 +34,27 @@ export class PredictionController {
           expectedGoalsHome: null,
           expectedGoalsAway: null,
           residualProbability: null,
-          markets: [{ market: 'MODEL', selection: 'NO_BET', probability: 0, confidence: 0, dataQuality: 0, fairOdds: null, status: 'NO_BET', reason: 'Statistiche mancanti' }],
+          markets: [{ market: 'MODEL', selection: 'NO_BET', probability: 0, confidence: 0, dataQuality: 0, fairOdds: null, status: 'NO_BET' as const, reason: 'Statistiche mancanti' }],
           inputs: null,
         };
       }
       const bundle = predictFixture(home, away);
-      const envelope = qualityEnvelope(home, away, bundle.markets.filter((m) => m.market === '1X2').map((m) => m.probability));
+      const oneXtwo = bundle.markets.filter((m: StructuredMarket) => m.market === '1X2').map((m: StructuredMarket) => m.probability);
+      const envelope = qualityEnvelope(home, away, oneXtwo);
+      const markets: PresentedMarket[] = bundle.markets.map((market: StructuredMarket) => ({
+        ...market,
+        confidence: envelope.confidence,
+        dataQuality: envelope.dataQuality,
+        status: envelope.active ? 'ACTIVE' : 'NO_BET',
+        reason: envelope.active ? undefined : 'Confidence/Data Quality sotto soglia',
+      }));
       return {
         fixture,
         expectedGoalsHome: bundle.expectedGoalsHome,
         expectedGoalsAway: bundle.expectedGoalsAway,
         residualProbability: bundle.residualProbability,
         inputs: { home, away },
-        markets: bundle.markets.map((market) => ({
-          ...market,
-          confidence: envelope.confidence,
-          dataQuality: envelope.dataQuality,
-          status: envelope.active ? 'ACTIVE' : 'NO_BET',
-          reason: envelope.active ? undefined : 'Confidence/Data Quality sotto soglia',
-        })),
+        markets,
       };
     });
 
