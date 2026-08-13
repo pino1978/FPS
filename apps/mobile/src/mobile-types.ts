@@ -1,0 +1,11 @@
+export type Market={market:string;selection:string;probability:number;confidence:number;dataQuality:number;fairOdds?:number|null;status:'ACTIVE'|'NO_BET';reason?:string;period?:'FT'|'HT';metric?:string;operator?:string;threshold?:number;outcome?:string};
+export type Fixture={id:string;utcDate:string;status?:string;home:{id?:string;name:string};away:{id?:string;name:string}};
+export type Row={fixture:Fixture;markets:Market[];expectedGoalsHome?:number|null;expectedGoalsAway?:number|null};
+export type Quick='Tutti'|'Top Pick'|'1X2'|'Gol'|'O/U'|'Team'|'NO BET';
+export type Sort='TIME'|'PROBABILITY'|'CONFIDENCE'|'DATA_QUALITY';
+export const pct=(v:unknown)=>v==null?'—':`${Math.round(Number(v)*100)}%`;
+export const day=(v:string)=>new Date(v).toLocaleDateString('it-IT',{weekday:'long',day:'2-digit',month:'short'});
+export const time=(v:string)=>new Date(v).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});
+export function category(m:Market){if(['1X2','DOUBLE_CHANCE','DRAW_NO_BET','WIN_MARGIN'].includes(m.market))return'Esito';if(m.market.startsWith('OVER_UNDER')||['BTTS','MULTIGOAL','GOALS_PARITY'].includes(m.market))return'Gol';if(m.market.startsWith('HOME_GOALS')||m.market.startsWith('AWAY_GOALS')||['CLEAN_SHEET','WIN_TO_NIL'].includes(m.market))return'Team';if(m.market==='EXACT_SCORE')return'Risultati';if(m.market==='COMBO')return'Combinazioni';return'Altro'}
+export function featured(r:Row){const c=(f:(m:Market)=>boolean)=>r.markets.filter(f).sort((a,b)=>b.probability-a.probability)[0];return[c(m=>m.market==='1X2'),c(m=>m.market==='OVER_UNDER_2_5'),c(m=>m.market==='BTTS'),c(m=>m.market.startsWith('HOME_GOALS_1_5')||m.market.startsWith('AWAY_GOALS_1_5'))].filter(Boolean)as Market[]}
+export function forQuick(r:Row,q:Quick){if(q==='Tutti'||q==='Top Pick')return r.markets;if(q==='1X2')return r.markets.filter(m=>['1X2','DOUBLE_CHANCE','DRAW_NO_BET'].includes(m.market));if(q==='Gol')return r.markets.filter(m=>['BTTS','MULTIGOAL','GOALS_PARITY'].includes(m.market));if(q==='O/U')return r.markets.filter(m=>m.market.startsWith('OVER_UNDER'));if(q==='Team')return r.markets.filter(m=>m.market.startsWith('HOME_GOALS')||m.market.startsWith('AWAY_GOALS'));if(q==='NO BET')return r.markets.filter(m=>m.status==='NO_BET');return r.markets}
