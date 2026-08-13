@@ -7,6 +7,38 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Fixture {
+  id          String   @id
+  competition String
+  status      String
+  utcDate     DateTime
+  homeTeamId  String
+  homeTeam    String
+  awayTeamId  String
+  awayTeam    String
+  source      String
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([competition, utcDate])
+  @@index([status, utcDate])
+}
+
+model TeamSnapshot {
+  id           String   @id @default(cuid())
+  competition  String
+  teamId       String
+  capturedAt   DateTime @default(now())
+  played       Int
+  points       Int
+  goalsFor     Int
+  goalsAgainst Int
+  formIndex    Float?
+  source       String
+
+  @@index([competition, teamId, capturedAt])
+}
+
 model PredictionRun {
   id           String               @id @default(cuid())
   fixtureId    String
@@ -14,9 +46,11 @@ model PredictionRun {
   source       String
   asOf         DateTime             @default(now())
   eventAt      DateTime
+  inputSnapshot Json?
   snapshots    PredictionSnapshot[]
 
   @@index([fixtureId, eventAt])
+  @@index([modelVersion, asOf])
 }
 
 model PredictionSnapshot {
@@ -39,6 +73,7 @@ model PredictionSnapshot {
   createdAt     DateTime      @default(now())
 
   @@index([status, outcome])
+  @@index([market, createdAt])
 }
 
 model Bet {
@@ -49,6 +84,7 @@ model Bet {
   stake         Float
   odds          Float?
   played        Boolean   @default(false)
+  simulated     Boolean   @default(false)
   status        String    @default("PENDING")
   eventAt       DateTime
   createdAt     DateTime  @default(now())
@@ -56,6 +92,7 @@ model Bet {
   resultVersion String?
 
   @@index([played, status, eventAt])
+  @@index([simulated, status, eventAt])
 }
 
 model BettingSystem {
@@ -65,6 +102,7 @@ model BettingSystem {
   budget       Float
   totalCost    Float
   played       Boolean             @default(false)
+  simulated    Boolean             @default(false)
   status       String              @default("PENDING")
   createdAt    DateTime            @default(now())
   selections   SystemSelection[]
@@ -112,6 +150,35 @@ model CombinationItem {
   @@unique([combinationId, selectionId])
 }
 
+model BacktestRun {
+  id           String   @id @default(cuid())
+  competition  String
+  modelVersion String
+  fromDate     DateTime
+  toDate       DateTime
+  status       String   @default("COMPLETED")
+  sample       Int
+  brierScore   Float?
+  hitRate      Float?
+  createdAt    DateTime @default(now())
+  parameters   Json?
+
+  @@index([competition, modelVersion, createdAt])
+}
+
+model PaperTradingRun {
+  id              String   @id @default(cuid())
+  bankrollInitial Float
+  bankrollFinal   Float
+  stakeTotal      Float
+  returnsTotal    Float
+  profit          Float
+  roi             Float?
+  betsCount       Int
+  createdAt       DateTime @default(now())
+  parameters      Json?
+}
+
 model AuditEvent {
   id         String   @id @default(cuid())
   entityType String
@@ -119,4 +186,6 @@ model AuditEvent {
   action     String
   payload    Json?
   createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
 }
