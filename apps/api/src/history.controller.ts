@@ -28,7 +28,7 @@ export class HistoryController {
     const eventAt = validDate(body.eventAt, 'eventAt');
     const played = body.played === true, simulated = body.simulated === true;
     if (played && simulated) throw new Error('A bet cannot be both real and simulated');
-    if (played && odds == null) throw new Error('actual odds are required for a real bet');
+    if ((played || simulated) && odds == null) throw new Error('execution odds are required for real and paper bets');
     const playedAt = body.playedAt ? validDate(body.playedAt, 'playedAt') : played ? new Date() : undefined;
     const origin = await this.findOrigin(body.fixtureId, body.market, body.selection, eventAt);
     const bet = await this.db.bet.create({
@@ -72,7 +72,7 @@ export class HistoryController {
     if (!['NOT_PLAYED', 'PLAYED', 'SIMULATED'].includes(body?.mode)) throw new Error('Invalid execution mode');
     const current = await this.db.bet.findUniqueOrThrow({ where: { id } });
     const played = body.mode === 'PLAYED', simulated = body.mode === 'SIMULATED';
-    if (played && body.odds == null && current.odds == null) throw new Error('actual odds are required for a real bet');
+    if ((played || simulated) && body.odds == null && current.odds == null) throw new Error('execution odds are required for real and paper bets');
     const updated = await this.db.bet.update({
       where: { id },
       data: {
@@ -181,7 +181,7 @@ export class HistoryController {
     if (!['NOT_PLAYED', 'PLAYED', 'SIMULATED'].includes(body?.mode)) throw new Error('Invalid execution mode');
     const current = await this.db.bettingSystem.findUniqueOrThrow({ where: { id }, include: { selections: true } });
     const played = body.mode === 'PLAYED', simulated = body.mode === 'SIMULATED';
-    if (played && current.selections.some((selection) => selection.odds == null)) throw new Error('actual odds are required for every selection in a real system');
+    if ((played || simulated) && current.selections.some((selection) => selection.odds == null)) throw new Error('execution odds are required for every selection in a real or paper system');
     const updated = await this.db.bettingSystem.update({
       where: { id },
       data: {
