@@ -101,9 +101,15 @@ function systemEconomics(system:any){
     if(combo.status==='LOSS')continue;
     if(combo.status==='VOID'){returns+=comboStake;continue;}
     if(combo.status!=='WIN')return null;
-    const odds=(combo.items||[]).map((i:any)=>Number(i.selection?.odds));
-    if(!odds.length||odds.some((odd:number)=>!Number.isFinite(odd)||odd<=1))return null;
-    returns+=comboStake*odds.reduce((p:number,o:number)=>p*o,1);
+    let product=1;
+    for(const item of combo.items||[]){
+      const selection=item.selection;
+      if(selection?.status==='VOID')continue;
+      const odd=Number(selection?.odds);
+      if(selection?.status!=='WIN'||!Number.isFinite(odd)||odd<=1)return null;
+      product*=odd;
+    }
+    returns+=comboStake*product;
   }
   return {stake,returns};
 }
