@@ -23,6 +23,13 @@ describe('SystemController validation',()=>{
     expect(()=>controller.build({selections:[selection],k:1,stake:1,fixedIds:['missing']})).toThrow('fixedIds contains an unknown selection');
   });
 
+  it('blocks logically incompatible selections in backend system generation',()=>{
+    const result=controller.build({selections:[selection,{...selection,id:'b',selection:'X'}],k:2,stake:1});
+    expect(result.status).toBe('INCOMPATIBLE');
+    expect(result.combinations).toHaveLength(0);
+    expect(result.cost).toBe(0);
+  });
+
   it('accepts a valid optimizer request',()=>{
     const result=controller.optimize({selections:[selection],budget:10,profile:'BALANCED'});
     expect(['OK','NO_BET']).toContain(result.status);
