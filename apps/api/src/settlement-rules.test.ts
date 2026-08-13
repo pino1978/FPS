@@ -38,9 +38,10 @@ describe('settleMvpMarket', () => {
     expect(settleMvpMarket('GOALS_PARITY','EVEN',score)).toBe('LOSS');
   });
 
-  it('settles anytime scorer from verified scorer evidence', () => {
+  it('settles anytime scorer from verified scorer evidence and display labels', () => {
     expect(settleMvpMarket('ANYTIME_SCORER', 'Mario Rossi', score)).toBe('WIN');
-    expect(settleMvpMarket('ANYTIME_SCORER', 'Altro Giocatore', score)).toBe('LOSS');
-    expect(settleMvpMarket('ANYTIME_SCORER', 'Mario Rossi', { home: 2, away: 1 })).toBe('UNSUPPORTED');
+    expect(settleMvpMarket('ANYTIME_SCORER', 'Mario Rossi segna', score)).toBe('WIN');
+    expect(settleMvpMarket('ANYTIME_SCORER', 'Altro Giocatore segna', score)).toBe('LOSS');
+    expect(settleMvpMarket('ANYTIME_SCORER', 'Mario Rossi segna', { home: 2, away: 1 })).toBe('UNSUPPORTED');
   });
 });
