@@ -107,6 +107,7 @@ test('played system → settlement → history critical flow',async({page})=>{
 test('system tray blocks incompatibility before generation',async({page})=>{
   await mockApi(page,{incompatible:true});
   await page.goto('/');
+  await page.getByRole('button',{name:'Analisi completa →'}).click();
   await page.getByRole('button',{name:'Aggiungi 1'}).click();
   await page.getByRole('button',{name:'Aggiungi X'}).click();
   await page.getByRole('button',{name:'Sistemi'}).first().click();
