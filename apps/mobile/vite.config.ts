@@ -1,1 +1,2 @@
-import{defineConfig}from'vite';import react from'@vitejs/plugin-react';export default defineConfig({plugins:[react()],define:{'process.env.NEXT_PUBLIC_API_URL':JSON.stringify('http://localhost:4000')},build:{target:'es2022'}});
+import{defineConfig}from'vite';import react from'@vitejs/plugin-react';import{resolve}from'node:path';
+export default defineConfig({plugins:[react()],resolve:{alias:{'@fps/domain':resolve(__dirname,'../../packages/domain/src/public.ts'),'@fps/player-engine':resolve(__dirname,'../../packages/player-engine/src/index.ts'),'@fps/mobile-runtime':resolve(__dirname,'../../packages/mobile-runtime/src/index.ts')}},define:{'process.env.NEXT_PUBLIC_API_URL':JSON.stringify('http://localhost:4000')},build:{target:'es2022'}});
