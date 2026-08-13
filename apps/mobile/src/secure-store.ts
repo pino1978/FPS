@@ -1,0 +1,2 @@
+import{SecureStorage}from'@aparajita/capacitor-secure-storage';import type{SecretStore}from'@fps/mobile-runtime';
+export class AndroidSecretStore implements SecretStore{private initialized=false;private async init(){if(!this.initialized){await SecureStorage.setKeyPrefix('fps_');this.initialized=true}}async get(key:string){await this.init();return SecureStorage.getItem(key)}async set(key:string,value:string){await this.init();await SecureStorage.setItem(key,value)}async remove(key:string){await this.init();await SecureStorage.removeItem(key)}}
