@@ -28,6 +28,16 @@ describe('settleMvpMarket', () => {
     expect(settleMvpMarket('COMBO', '1 + GOAL', score)).toBe('WIN');
   });
 
+  it('settles clean sheet, win-to-nil, winning margin and parity', () => {
+    expect(settleMvpMarket('CLEAN_SHEET','HOME YES',{home:2,away:0})).toBe('WIN');
+    expect(settleMvpMarket('CLEAN_SHEET','AWAY YES',{home:2,away:0})).toBe('LOSS');
+    expect(settleMvpMarket('WIN_TO_NIL','HOME YES',{home:2,away:0})).toBe('WIN');
+    expect(settleMvpMarket('WIN_MARGIN','HOME BY 1',score)).toBe('WIN');
+    expect(settleMvpMarket('WIN_MARGIN','HOME BY 2+',score)).toBe('LOSS');
+    expect(settleMvpMarket('GOALS_PARITY','ODD',score)).toBe('WIN');
+    expect(settleMvpMarket('GOALS_PARITY','EVEN',score)).toBe('LOSS');
+  });
+
   it('settles anytime scorer from verified scorer evidence', () => {
     expect(settleMvpMarket('ANYTIME_SCORER', 'Mario Rossi', score)).toBe('WIN');
     expect(settleMvpMarket('ANYTIME_SCORER', 'Altro Giocatore', score)).toBe('LOSS');
