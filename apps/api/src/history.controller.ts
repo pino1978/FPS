@@ -29,6 +29,7 @@ export class HistoryController {
     const played = body.played === true, simulated = body.simulated === true;
     if (played && simulated) throw new Error('A bet cannot be both real and simulated');
     const playedAt = body.playedAt ? validDate(body.playedAt, 'playedAt') : played ? new Date() : undefined;
+    const origin = await this.findOrigin(body.fixtureId, body.market, body.selection, eventAt);
     const bet = await this.db.bet.create({
       data: {
         fixtureId: body.fixtureId,
@@ -43,12 +44,18 @@ export class HistoryController {
         simulated,
         playedAt,
         eventAt,
+        ...originData(origin),
       },
     });
     await this.db.auditEvent.create({
-      data: { entityType: 'Bet', entityId: bet.id, action: played ? 'REAL_BET_RECORDED' : simulated ? 'PAPER_BET_RECORDED' : 'BET_SAVED' },
+      data: {
+        entityType: 'Bet',
+        entityId: bet.id,
+        action: played ? 'REAL_BET_RECORDED' : simulated ? 'PAPER_BET_RECORDED' : 'BET_SAVED',
+        payload: { originSnapshotId: origin?.id ?? null },
+      },
     });
-    return withPayout(bet);
+    return presentBet(bet);
   }
 
   @Post('bets/:id/execution')
@@ -76,7 +83,7 @@ export class HistoryController {
       },
     });
     await this.db.auditEvent.create({ data: { entityType: 'Bet', entityId: id, action: `EXECUTION_${body.mode}` } });
-    return withPayout(updated);
+    return presentBet(updated);
   }
 
   @Get('bets')
@@ -84,17 +91,21 @@ export class HistoryController {
     @Query('mode') mode?: 'NOT_PLAYED' | 'PLAYED' | 'SIMULATED',
     @Query('status') status?: string,
     @Query('competition') competition?: string,
+    @Query('team') team?: string,
     @Query('market') market?: string,
     @Query('bookmaker') bookmaker?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
     const dateFilter = dateRange(from, to);
+    const fixtureIds = team ? await this.fixtureIds({ team }) : undefined;
+    if (team && !fixtureIds?.length) return [];
     const bets = await this.db.bet.findMany({
       where: {
         ...(mode === 'PLAYED' ? { played: true, simulated: false } : mode === 'SIMULATED' ? { simulated: true, played: false } : mode === 'NOT_PLAYED' ? { played: false, simulated: false } : {}),
         ...(status ? { status } : {}),
         ...(competition ? { competition } : {}),
+        ...(fixtureIds ? { fixtureId: { in: fixtureIds } } : {}),
         ...(market ? { market } : {}),
         ...(bookmaker ? { bookmaker } : {}),
         ...(dateFilter ? { createdAt: dateFilter } : {}),
@@ -102,7 +113,57 @@ export class HistoryController {
       orderBy: { createdAt: 'desc' },
       take: 500,
     });
-    return bets.map(withPayout);
+    return bets.map(presentBet);
+  }
+
+  @Get('predictions')
+  async predictions(
+    @Query('competition') competition?: string,
+    @Query('team') team?: string,
+    @Query('market') market?: string,
+    @Query('outcome') outcome?: string,
+    @Query('modelVersion') modelVersion?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const fixtureIds = competition || team ? await this.fixtureIds({ competition, team }) : undefined;
+    if ((competition || team) && !fixtureIds?.length) return [];
+    const snapshots = await this.db.predictionSnapshot.findMany({
+      where: {
+        ...(market ? { market } : {}),
+        ...(outcome ? { settlement: { is: { outcome } } } : {}),
+        run: {
+          ...(fixtureIds ? { fixtureId: { in: fixtureIds } } : {}),
+          ...(modelVersion ? { modelVersion } : {}),
+          ...(dateRange(from, to) ? { asOf: dateRange(from, to) } : {}),
+        },
+      },
+      include: { run: true, settlement: true },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    });
+    const fixtureMap = await this.fixtureMap([...new Set(snapshots.map((x) => x.run.fixtureId))]);
+    return snapshots.map((snapshot) => ({
+      id: snapshot.id,
+      fixtureId: snapshot.run.fixtureId,
+      fixture: fixtureMap.get(snapshot.run.fixtureId) ?? null,
+      market: snapshot.market,
+      selection: snapshot.selection,
+      probability: snapshot.probability,
+      confidence: snapshot.confidence,
+      dataQuality: snapshot.dataQuality,
+      fairOdds: snapshot.fairOdds,
+      valueStatus: snapshot.valueStatus,
+      offeredOdds: snapshot.offeredOdds,
+      expectedValue: snapshot.expectedValue,
+      status: snapshot.status,
+      reason: snapshot.reason,
+      modelVersion: snapshot.run.modelVersion,
+      capturedAt: snapshot.createdAt,
+      eventAt: snapshot.run.eventAt,
+      outcome: snapshot.settlement?.outcome ?? null,
+      settledAt: snapshot.settlement?.settledAt ?? null,
+    }));
   }
 
   @Post('systems/:id/execution')
@@ -127,35 +188,100 @@ export class HistoryController {
       include: { selections: true, combinations: { include: { items: true } } },
     });
     await this.db.auditEvent.create({ data: { entityType: 'BettingSystem', entityId: id, action: `EXECUTION_${body.mode}` } });
-    return updated;
+    return presentSystem(updated);
   }
 
   @Get('systems')
   async systems(
     @Query('mode') mode?: 'NOT_PLAYED' | 'PLAYED' | 'SIMULATED',
     @Query('status') status?: string,
+    @Query('competition') competition?: string,
+    @Query('team') team?: string,
+    @Query('market') market?: string,
     @Query('bookmaker') bookmaker?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
     const dateFilter = dateRange(from, to);
-    return this.db.bettingSystem.findMany({
+    const fixtureIds = team ? await this.fixtureIds({ team }) : undefined;
+    if (team && !fixtureIds?.length) return [];
+    const systems = await this.db.bettingSystem.findMany({
       where: {
         ...(mode === 'PLAYED' ? { played: true, simulated: false } : mode === 'SIMULATED' ? { simulated: true, played: false } : mode === 'NOT_PLAYED' ? { played: false, simulated: false } : {}),
         ...(status ? { status } : {}),
         ...(bookmaker ? { bookmaker } : {}),
         ...(dateFilter ? { createdAt: dateFilter } : {}),
+        ...((competition || fixtureIds || market) ? {
+          selections: { some: {
+            ...(competition ? { competition } : {}),
+            ...(fixtureIds ? { fixtureId: { in: fixtureIds } } : {}),
+            ...(market ? { market } : {}),
+          } },
+        } : {}),
       },
       include: { selections: true, combinations: { include: { items: true } } },
       orderBy: { createdAt: 'desc' },
       take: 250,
     });
+    return systems.map(presentSystem);
+  }
+
+  private async findOrigin(fixtureId: string, market: string, selection: string, eventAt: Date) {
+    return this.db.predictionSnapshot.findFirst({
+      where: { fixtureId: undefined, market, selection, run: { fixtureId, asOf: { lt: eventAt } } },
+      include: { run: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  private async fixtureIds(input: { competition?: string; team?: string }) {
+    const fixtures = await this.db.fixture.findMany({
+      where: {
+        ...(input.competition ? { competition: input.competition } : {}),
+        ...(input.team ? { OR: [
+          { homeTeam: { contains: input.team, mode: 'insensitive' } },
+          { awayTeam: { contains: input.team, mode: 'insensitive' } },
+        ] } : {}),
+      },
+      select: { id: true },
+      take: 5000,
+    });
+    return fixtures.map((x) => x.id);
+  }
+
+  private async fixtureMap(ids: string[]) {
+    if (!ids.length) return new Map<string, any>();
+    const rows = await this.db.fixture.findMany({ where: { id: { in: ids } } });
+    return new Map(rows.map((x) => [x.id, x]));
   }
 }
 
-function withPayout<T extends { status: string; stake: number; odds: number | null }>(bet: T) {
+function originData(origin: any) {
+  return origin ? {
+    originProbability: origin.probability,
+    originConfidence: origin.confidence,
+    originDataQuality: origin.dataQuality,
+    originFairOdds: origin.fairOdds,
+    originModelVersion: origin.run.modelVersion,
+    originCapturedAt: origin.createdAt,
+  } : {};
+}
+function originalPrediction(x: any) {
+  return x.originModelVersion ? {
+    probability: x.originProbability,
+    confidence: x.originConfidence,
+    dataQuality: x.originDataQuality,
+    fairOdds: x.originFairOdds,
+    modelVersion: x.originModelVersion,
+    capturedAt: x.originCapturedAt ?? null,
+  } : null;
+}
+function presentBet<T extends { status: string; stake: number; odds: number | null }>(bet: T) {
   const payout = bet.status === 'WIN' && bet.odds ? bet.stake * bet.odds : bet.status === 'LOSS' ? 0 : bet.status === 'VOID' ? bet.stake : null;
-  return { ...bet, payout: payout == null ? null : Number(payout.toFixed(2)) };
+  return { ...bet, payout: payout == null ? null : Number(payout.toFixed(2)), originalPrediction: originalPrediction(bet) };
+}
+function presentSystem(system: any) {
+  return { ...system, selections: (system.selections ?? []).map((x: any) => ({ ...x, originalPrediction: originalPrediction(x) })) };
 }
 function clean(value?: string) { const v = value?.trim(); return v ? v.slice(0, 500) : undefined; }
 function assertText(value: unknown, field: string) { if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} is required`); }
