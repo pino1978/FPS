@@ -14,11 +14,13 @@ export class OperationsController {
   }
 
   @Post('backtests/run')
-  async backtest(@Body() body: { competition: string; modelVersion: string; from: string; to: string }) {
+  async backtest(@Body() body: { competition: string; season?: string; modelVersion: string; from: string; to: string }) {
     if (!body?.competition || !body?.modelVersion || !body?.from || !body?.to) throw new Error('competition, modelVersion, from and to are required');
     const from = new Date(body.from), to = new Date(body.to);
     if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) throw new Error('invalid backtest date range');
-    return this.analytics.runBacktest({ competition: body.competition, modelVersion: body.modelVersion, from, to });
+    const season = body.season?.trim();
+    if (season && !/^\d{4}(?:[-/]\d{4})?$/.test(season)) throw new Error('season must be YYYY or YYYY-YYYY');
+    return this.analytics.runBacktest({ competition: body.competition, season, modelVersion: body.modelVersion, from, to });
   }
 
   @Get('backtests')
