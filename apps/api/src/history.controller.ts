@@ -289,13 +289,19 @@ function presentBet<T extends { status: string; stake: number; odds: number | nu
 function presentSystem(system: any) {
   const combinations = system.combinations ?? [];
   let payout = 0;
-  let payoutKnown = combinations.length > 0 && combinations.every((combo: any) => {
+  const payoutKnown = combinations.length > 0 && combinations.every((combo: any) => {
     if (combo.status === 'LOSS') return true;
     if (combo.status === 'VOID') { payout += Number(combo.stake || 0); return true; }
     if (combo.status !== 'WIN') return false;
-    const odds = (combo.items ?? []).map((item: any) => item.selection?.odds);
-    if (!odds.length || odds.some((odd: any) => odd == null)) return false;
-    payout += Number(combo.stake || 0) * odds.reduce((product: number, odd: number) => product * Number(odd), 1);
+    let product = 1;
+    for (const item of combo.items ?? []) {
+      const selection = item.selection;
+      if (selection?.status === 'VOID') continue;
+      const odd = Number(selection?.odds);
+      if (selection?.status !== 'WIN' || !Number.isFinite(odd) || odd <= 1) return false;
+      product *= odd;
+    }
+    payout += Number(combo.stake || 0) * product;
     return true;
   });
   return {
