@@ -271,13 +271,20 @@ function groupBetMetrics(rows:BetMetricRow[],key:(row:BetMetricRow)=>string){
   for(const row of rows){const k=key(row);groups.set(k,[...(groups.get(k)??[]),row])}
   return [...groups.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([group,items])=>({group,...summarizeBets(items)}));
 }
-function summarizeSystems(systems:any[]){
+export function summarizeSystems(systems:any[]){
   let stake=0,returns=0,financiallySettled=0,wins=0,losses=0,voids=0;
   for(const system of systems)for(const combo of system.combinations??[]){
     stake+=Number(combo.stake||0);
     if(combo.status==='WIN'){
-      const odds=(combo.items??[]).map((item:any)=>item.selection?.odds).filter((x:any)=>x!=null);
-      if(odds.length===(combo.items??[]).length){returns+=Number(combo.stake||0)*odds.reduce((product:number,x:number)=>product*Number(x),1);financiallySettled++;}
+      let product=1,valid=true;
+      for(const item of combo.items??[]){
+        const selection=item.selection;
+        if(selection?.status==='VOID')continue;
+        const odd=Number(selection?.odds);
+        if(selection?.status!=='WIN'||!Number.isFinite(odd)||odd<=1){valid=false;break;}
+        product*=odd;
+      }
+      if(valid){returns+=Number(combo.stake||0)*product;financiallySettled++;}
       wins++;
     }else if(combo.status==='LOSS'){losses++;financiallySettled++;}
     else if(combo.status==='VOID'){returns+=Number(combo.stake||0);voids++;financiallySettled++;}
