@@ -40,92 +40,115 @@ model TeamSnapshot {
 }
 
 model PredictionRun {
-  id           String               @id @default(cuid())
-  fixtureId    String
-  modelVersion String
-  source       String
-  asOf         DateTime             @default(now())
-  eventAt      DateTime
+  id            String               @id @default(cuid())
+  fixtureId     String
+  modelVersion  String
+  source        String
+  asOf          DateTime             @default(now())
+  eventAt       DateTime
   inputSnapshot Json?
-  snapshots    PredictionSnapshot[]
+  snapshots     PredictionSnapshot[]
 
   @@index([fixtureId, eventAt])
   @@index([modelVersion, asOf])
 }
 
 model PredictionSnapshot {
-  id            String        @id @default(cuid())
+  id            String                @id @default(cuid())
   runId         String
-  run           PredictionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run           PredictionRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
   market        String
   selection     String
   probability   Float
   confidence    Float
   dataQuality   Float
   fairOdds      Float?
-  valueStatus   String        @default("UNAVAILABLE")
+  valueStatus   String                @default("UNAVAILABLE")
   offeredOdds   Float?
   expectedValue Float?
   status        String
-  outcome       String?
-  settledAt     DateTime?
-  resultVersion String?
-  createdAt     DateTime      @default(now())
+  reason        String?
+  createdAt     DateTime              @default(now())
+  settlement    PredictionSettlement?
 
-  @@index([status, outcome])
+  @@index([status, createdAt])
   @@index([market, createdAt])
 }
 
-model Bet {
-  id            String    @id @default(cuid())
-  fixtureId     String
-  market        String
-  selection     String
-  stake         Float
-  odds          Float?
-  played        Boolean   @default(false)
-  simulated     Boolean   @default(false)
-  status        String    @default("PENDING")
-  eventAt       DateTime
-  createdAt     DateTime  @default(now())
-  verifiedAt    DateTime?
-  resultVersion String?
+model PredictionSettlement {
+  id            String             @id @default(cuid())
+  snapshotId    String             @unique
+  snapshot      PredictionSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  outcome       String
+  settledAt     DateTime           @default(now())
+  resultVersion String
+  evidence      Json?
 
-  @@index([played, status, eventAt])
-  @@index([simulated, status, eventAt])
+  @@index([outcome, settledAt])
+}
+
+model Bet {
+  id                 String    @id @default(cuid())
+  fixtureId          String
+  competition        String?
+  market             String
+  selection          String
+  stake              Float
+  odds               Float?
+  bookmaker          String?
+  notes              String?
+  played             Boolean   @default(false)
+  simulated          Boolean   @default(false)
+  playedAt           DateTime?
+  status             String    @default("PENDING")
+  verificationStatus String    @default("PENDING")
+  eventAt            DateTime
+  createdAt          DateTime  @default(now())
+  verifiedAt         DateTime?
+  resultVersion      String?
+
+  @@index([played, verificationStatus, eventAt])
+  @@index([simulated, verificationStatus, eventAt])
+  @@index([competition, market, createdAt])
 }
 
 model BettingSystem {
-  id           String              @id @default(cuid())
-  mode         String
-  profile      String?
-  budget       Float
-  totalCost    Float
-  played       Boolean             @default(false)
-  simulated    Boolean             @default(false)
-  status       String              @default("PENDING")
-  createdAt    DateTime            @default(now())
-  selections   SystemSelection[]
-  combinations SystemCombination[]
+  id                 String              @id @default(cuid())
+  mode               String
+  profile            String?
+  budget             Float
+  totalCost          Float
+  bookmaker          String?
+  notes              String?
+  played             Boolean             @default(false)
+  simulated          Boolean             @default(false)
+  playedAt           DateTime?
+  status             String              @default("PENDING")
+  verificationStatus String              @default("PENDING")
+  createdAt          DateTime            @default(now())
+  selections         SystemSelection[]
+  combinations       SystemCombination[]
 }
 
 model SystemSelection {
-  id               String            @id @default(cuid())
-  systemId         String
-  system           BettingSystem     @relation(fields: [systemId], references: [id], onDelete: Cascade)
-  clientKey        String
-  fixtureId        String
-  market           String
-  selection        String
-  eventAt          DateTime
-  odds             Float?
-  status           String            @default("PENDING")
-  verifiedAt       DateTime?
-  resultVersion    String?
-  combinationItems CombinationItem[]
+  id                 String            @id @default(cuid())
+  systemId           String
+  system             BettingSystem     @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  clientKey          String
+  fixtureId          String
+  competition        String?
+  market             String
+  selection          String
+  eventAt            DateTime
+  odds               Float?
+  status             String            @default("PENDING")
+  verificationStatus String            @default("PENDING")
+  verifiedAt         DateTime?
+  resultVersion      String?
+  combinationItems   CombinationItem[]
 
   @@unique([systemId, clientKey])
-  @@index([status, eventAt])
+  @@index([verificationStatus, eventAt])
 }
 
 model SystemCombination {
@@ -174,7 +197,11 @@ model PaperTradingRun {
   returnsTotal    Float
   profit          Float
   roi             Float?
+  yieldValue      Float?
+  winRate         Float?
+  maxDrawdown     Float?
   betsCount       Int
+  systemsCount    Int      @default(0)
   createdAt       DateTime @default(now())
   parameters      Json?
 }
