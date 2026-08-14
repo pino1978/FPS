@@ -32,7 +32,9 @@ jobs:
       - name: Production dependency security gate
         run: npm audit --omit=dev --audit-level=high
       - name: Apply versioned database migrations
-        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+        run: npm run db:migrate
+      - name: Verify database migration status
+        run: npm run db:status
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
