@@ -1,1 +1,31 @@
-{"name":"football-prediction-system","private":true,"workspaces":["apps/*","packages/*"],"scripts":{"build":"npm run build -w @fps/domain && npm run build -w @fps/player-engine && npm run build -w @fps/mobile-runtime && npm run build -w @fps/api && npm run build -w @fps/web && npm run build -w @fps/mobile","typecheck":"npm run build -w @fps/domain && npm run build -w @fps/player-engine && npm run build -w @fps/mobile-runtime && npm run typecheck -w @fps/api && npm run typecheck -w @fps/web && npm run typecheck -w @fps/mobile","test":"npm run test -w @fps/domain && npm run test -w @fps/player-engine && npm run test -w @fps/mobile-runtime && npm run test -w @fps/api && npm run test -w @fps/web && npm run test -w @fps/mobile","e2e":"playwright test","dev":"concurrently \"npm run dev -w @fps/api\" \"npm run dev -w @fps/web\"","start:api":"npm run start -w @fps/api","db:migrate":"npm run db:migrate -w @fps/api","db:status":"npm run db:status -w @fps/api","db:push":"npm run db:push -w @fps/api","mobile:build":"npm run build -w @fps/mobile"},"overrides":{"postcss":"8.5.23","sharp":"0.35.3","react":"19.1.1","react-dom":"19.1.1"},"devDependencies":{"@playwright/test":"^1.55.0","concurrently":"^9.0.0","typescript":"^5.7.0"},"engines":{"node":">=22"}}
+{
+  "name": "football-prediction-system",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build -w @fps/domain && npm run build -w @fps/player-engine && npm run build -w @fps/mobile-runtime && npm run build -w @fps/api && npm run build -w @fps/web && npm run build -w @fps/mobile",
+    "typecheck": "npm run build -w @fps/domain && npm run build -w @fps/player-engine && npm run build -w @fps/mobile-runtime && npm run typecheck -w @fps/api && npm run typecheck -w @fps/web && npm run typecheck -w @fps/mobile",
+    "test": "npm run test -w @fps/domain && npm run test -w @fps/player-engine && npm run test -w @fps/mobile-runtime && npm run test -w @fps/api && npm run test -w @fps/web && npm run test -w @fps/mobile",
+    "e2e": "playwright test",
+    "dev": "concurrently \"npm run dev -w @fps/api\" \"npm run dev -w @fps/web\"",
+    "start:api": "npm run start -w @fps/api",
+    "db:migrate": "npm run db:migrate -w @fps/api",
+    "db:status": "npm run db:status -w @fps/api",
+    "db:push": "npm run db:push -w @fps/api",
+    "mobile:build": "npm run build -w @fps/mobile"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "concurrently": "^9.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
