@@ -2,4 +2,5 @@
 import '../../mobile/src/mobile-v2.css';
 import '../../mobile/src/mobile-v2-filters.css';
 import '../../mobile/src/mobile-v2-release.css';
-export { default } from '../../mobile/src/MobileHome';
+import '../../mobile/src/mobile-v3.css';
+export { default } from '../../mobile/src/MobileHomeV3';
