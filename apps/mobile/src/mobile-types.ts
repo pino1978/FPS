@@ -1,5 +1,5 @@
 export type Market={market:string;selection:string;probability:number;confidence:number;dataQuality:number;fairOdds?:number|null;status:'ACTIVE'|'NO_BET';reason?:string;period?:'FT'|'HT';metric?:string;operator?:string;threshold?:number;outcome?:string};
-export type Fixture={id:string;utcDate:string;status?:string;home:{id?:string;name:string};away:{id?:string;name:string}};
+export type Fixture={id:string;utcDate:string;status?:string;matchday?:number;home:{id?:string;name:string};away:{id?:string;name:string}};
 export type Row={fixture:Fixture;markets:Market[];expectedGoalsHome?:number|null;expectedGoalsAway?:number|null};
 export type Quick='Tutti'|'Top Pick'|'1X2'|'Gol'|'O/U'|'Team'|'NO BET';
 export type Sort='TIME'|'PROBABILITY'|'CONFIDENCE'|'DATA_QUALITY';
