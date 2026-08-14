@@ -3,10 +3,11 @@ import HistoryDashboard from'../../web/app/HistoryDashboard';
 import StatsDashboard from'../../web/app/StatsDashboard';
 import SystemBuilderPanel,{type SystemPick}from'../../web/app/SystemBuilderPanel';
 import MatchIntelligence from'../../web/app/MatchIntelligence';
+import DataFreshnessBar from'./DataFreshnessBar';
 import type{Market,Row}from'./mobile-types';
 import{day,featured,pct}from'./mobile-types';
 
-const API='http://localhost:4000',RELEASE='v1.2.0-beta.2';
+const API='http://localhost:4000',RELEASE='v1.2.0-beta.3';
 type Tab='Home'|'Partite'|'Sistema'|'Storico'|'Statistiche'|'I miei sistemi'|'Impostazioni';
 type Mode='PRESEASON'|'LIVE';
 type SimpleFilter='Tutte'|'Più affidabili'|'Gol'|'Over/Under'|'Marcatori';
@@ -21,6 +22,7 @@ export default function MobileHomeV4(){
  const available=useMemo(()=>rows.flatMap(r=>featured(r).filter(m=>m.status==='ACTIVE').map(m=>pick(r,m))),[rows]);
  if(detail)return <MatchDetail row={detail} bag={bag} toggle={toggle} back={()=>setDetail(null)} openSystem={()=>{setDetail(null);setTab('Sistema')}}/>;
  return <div className="mShell v4Shell"><header className="v4Header"><button className="v4Icon" aria-label="Apri menu" onClick={()=>setDrawer(true)}>☰</button><div><small>SERIE A</small><h1>{tab}</h1></div><span>{RELEASE}</span></header>
+ <DataFreshnessBar onRefresh={load}/>
  {drawer&&<Drawer tab={tab} mode={mode} close={()=>setDrawer(false)} navigate={t=>{setTab(t);setDrawer(false)}} setMode={m=>{setMode(m);setTab('Home');setDrawer(false)}}/>}
  <main className="v4Main">{tab==='Home'&&<Home rows={rows} bag={bag} loading={loading} error={error} retry={load} toggle={toggle} open={setDetail}/>} {tab==='Partite'&&<Fixtures rows={rows} open={setDetail}/>} {tab==='Sistema'&&<SystemBuilderPanel bag={bag} setBag={setBag} available={available}/>} {tab==='Storico'&&<HistoryDashboard/>}{tab==='Statistiche'&&<StatsDashboard/>}{tab==='I miei sistemi'&&<SavedSystems/>}{tab==='Impostazioni'&&<Settings mode={mode}/>}</main>
  {toast&&<div className="v4Toast" role="status">{toast}</div>}
