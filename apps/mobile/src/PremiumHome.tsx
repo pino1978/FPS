@@ -1,4 +1,4 @@
-import React,{useEffect,useMemo,useState}from'react';
+import React,{useEffect,useMemo,useRef,useState}from'react';
 import HistoryDashboard from'../../web/app/HistoryDashboard';
 import StatsDashboard from'../../web/app/StatsDashboard';
 import SystemBuilderPanel,{type SystemPick}from'../../web/app/SystemBuilderPanel';
@@ -18,10 +18,13 @@ async function post(url:string,body:unknown){return request(url,{method:'POST',h
 
 export default function PremiumHome(){
  const[rows,setRows]=useState<Row[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[bag,setBag]=useState<SystemPick[]>([]),[tab,setTab]=useState<Tab>('Home'),[detail,setDetail]=useState<Row|null>(null),[drawer,setDrawer]=useState(false),[mode,setMode]=useState<Mode>('PRESEASON'),[toast,setToast]=useState(''),[conflict,setConflict]=useState('');
+ const bagRef=useRef<SystemPick[]>([]),gateRef=useRef<Promise<void>>(Promise.resolve());
  const load=()=>{setLoading(true);setError('');const endpoint=mode==='PRESEASON'?'/v2/preseason':'/v2/predictions';void request(`${API}${endpoint}?competition=SA&persist=true`).then(b=>setRows(shortRows(b.data||[]))).catch(e=>setError(e.message)).finally(()=>setLoading(false))};
  useEffect(load,[mode]);
- const toggle=async(row:Row,m:Market)=>{const p=pick(row,m),exists=bag.some(x=>x.id===p.id);if(exists){setBag(x=>x.filter(i=>i.id!==p.id));setToast('Rimosso dal sistema');setConflict('');window.setTimeout(()=>setToast(''),1400);return}try{const analysis=await post(`${API}/v2/systems/analyze`,{selections:[...bag,p]});if(analysis?.status==='INCOMPATIBLE'){const pair=(analysis.incompatible||[]).find((x:any)=>x.left===p.id||x.right===p.id);const otherId=pair?(pair.left===p.id?pair.right:pair.left):undefined;const other=bag.find(x=>x.id===otherId)as PremiumPick|undefined;const msg=`Non puoi aggiungere ${p.label||p.selection}${other?` insieme a ${other.label||other.selection}`:''}: le due scelte sono incompatibili.`;setConflict(msg);setToast('Selezione non aggiunta');window.setTimeout(()=>setToast(''),1800);return}setBag(x=>[...x,p]);setConflict('');setToast(analysis?.correlations?.some((x:any)=>x.level==='HIGH')?'Aggiunta · correlazione alta rilevata':'Aggiunto al sistema');window.setTimeout(()=>setToast(''),1600)}catch(e:any){setConflict(`Controllo incompatibilità non disponibile: ${e?.message||e}`)}};
- const removePick=(id:string)=>setBag(x=>x.filter(p=>p.id!==id));
+ useEffect(()=>{bagRef.current=bag},[bag]);
+ const applyBag=(next:SystemPick[])=>{bagRef.current=next;setBag(next)};
+ const toggle=(row:Row,m:Market)=>{const task=async()=>{const p=pick(row,m),current=bagRef.current,exists=current.some(x=>x.id===p.id);if(exists){applyBag(current.filter(i=>i.id!==p.id));setToast('Rimosso dal sistema');setConflict('');window.setTimeout(()=>setToast(''),1400);return}try{const analysis=await post(`${API}/v2/systems/analyze`,{selections:[...current,p]});if(analysis?.status==='INCOMPATIBLE'){const pair=(analysis.incompatible||[]).find((x:any)=>x.left===p.id||x.right===p.id);const otherId=pair?(pair.left===p.id?pair.right:pair.left):undefined;const other=current.find(x=>x.id===otherId)as PremiumPick|undefined;const msg=`Non puoi aggiungere ${p.label||p.selection}${other?` insieme a ${other.label||other.selection}`:''}: le due scelte sono incompatibili.`;setConflict(msg);setToast('Selezione non aggiunta');window.setTimeout(()=>setToast(''),1800);return}applyBag([...current,p]);setConflict('');setToast(analysis?.correlations?.some((x:any)=>x.level==='HIGH')?'Aggiunta · correlazione alta rilevata':'Aggiunto al sistema');window.setTimeout(()=>setToast(''),1600)}catch(e:any){setConflict(`Controllo incompatibilità non disponibile: ${e?.message||e}`);setToast('Selezione non aggiunta');window.setTimeout(()=>setToast(''),1800)}};const run=gateRef.current.then(task,task);gateRef.current=run.catch(()=>undefined);return run};
+ const removePick=(id:string)=>applyBag(bagRef.current.filter(p=>p.id!==id));
  const available=useMemo(()=>rows.flatMap(r=>featured(r).filter(m=>m.status==='ACTIVE').map(m=>pick(r,m))),[rows]);
  if(detail)return <PremiumMatchDetail row={detail} bag={bag} toggle={toggle} back={()=>setDetail(null)} openSystem={()=>{setDetail(null);setTab('Sistema')}}/>;
  return <div className="pShell">
